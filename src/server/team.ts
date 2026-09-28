@@ -3,6 +3,7 @@ import { cache } from "react";
 import { notFound } from "next/navigation";
 import { admin } from "@/lib/supabase/admin";
 import { currentUser, requireUser, type SessionUser } from "@/lib/tenancy";
+import { chainOf, descendantsOf, orgTree } from "@/lib/org-tree";
 
 /**
  * Agency team CRM. Team roles live in team_members (per organization that runs a team, usually the platform org).
@@ -42,32 +43,25 @@ export const teamRowsFor = cache(async (userId: string) => {
 });
 
 export async function descendants(orgId: string): Promise<string[]> {
-  const { data } = await admin().from("organizations").select("id,parent_id");
-  const all = (data ?? []) as { id: string; parent_id: string | null }[];
-  const out = [orgId];
-  for (let i = 0; i < out.length && i < 500; i++) for (const o of all) if (o.parent_id === out[i] && !out.includes(o.id)) out.push(o.id);
-  return out;
+  return descendantsOf(await orgTree(), orgId);
 }
 
 export async function ancestors(orgId: string): Promise<string[]> {
-  const out: string[] = [];
-  let id: string | null = orgId;
-  for (let i = 0; id && i < 6; i++) {
-    out.push(id);
-    const { data }: { data: { parent_id: string | null } | null } = await admin().from("organizations").select("parent_id").eq("id", id).maybeSingle();
-    id = data?.parent_id ?? null;
-  }
-  return out;
+  return chainOf(await orgTree(), orgId)
+    .map((o) => o.id)
+    .reverse();
 }
 
 /** Team context for the signed-in user, or null when they are not on any team. */
 export const teamContext = cache(async (teamParam?: string | null): Promise<TeamCtx | null> => {
   const user = await currentUser();
   if (!user) return null;
-  const rows = await teamRowsFor(user.id);
+  // Team rows, assignments and the org tree in parallel (one round trip).
+  const [rows, { data: allAsg }, tree] = await Promise.all([teamRowsFor(user.id), admin().from("workspace_assignments").select("workspace_id,team_org_id").eq("user_id", user.id), orgTree()]);
   if (!rows.length) return null;
   const pick = rows.find((r) => r.org_id === teamParam) ?? rows.find((r) => orgOf(r)?.type === "platform") ?? rows[0];
-  const [orgIds, { data: asg }] = await Promise.all([descendants(pick.org_id), admin().from("workspace_assignments").select("workspace_id").eq("user_id", user.id).eq("team_org_id", pick.org_id)]);
+  const orgIds = descendantsOf(tree, pick.org_id);
+  const asg = (allAsg ?? []).filter((a) => a.team_org_id === pick.org_id);
   return {
     user,
     orgId: pick.org_id,
@@ -147,19 +141,47 @@ export async function teamMembers(orgId: string) {
 }
 
 /** user id → display label (name, else email). Service role: team pages only. */
+const emailCache = new Map<string, { email: string; at: number }>();
+
+/** Emails for user ids (Auth admin API), cached 5 minutes per server instance: usually zero round trips. */
+export async function emailsFor(ids: string[]): Promise<Map<string, string>> {
+  const now = Date.now();
+  const pairs = await Promise.all(
+    [...new Set(ids.filter(Boolean))].map(async (id) => {
+      let e = emailCache.get(id);
+      if (!e || now - e.at > 300_000) {
+        const { data } = await admin().auth.admin.getUserById(id);
+        e = { email: data.user?.email ?? "", at: now };
+        emailCache.set(id, e);
+      }
+      return [id, e.email] as const;
+    }),
+  );
+  return new Map(pairs);
+}
 export async function userLabels(ids: string[]): Promise<Map<string, { name: string; email: string }>> {
   const db = admin();
   const uniq = [...new Set(ids.filter(Boolean))];
   const out = new Map<string, { name: string; email: string }>();
-  const { data: tm } = uniq.length ? await db.from("team_members").select("user_id,full_name").in("user_id", uniq) : { data: [] };
+  if (!uniq.length) return out;
+  const now = Date.now();
+  // Names (team_members) and emails (Auth) in parallel; emails cached 5 minutes per server instance.
+  const [{ data: tm }, emails] = await Promise.all([
+    db.from("team_members").select("user_id,full_name").in("user_id", uniq),
+    Promise.all(
+      uniq.map(async (id) => {
+        let e = emailCache.get(id);
+        if (!e || now - e.at > 300_000) {
+          const { data } = await db.auth.admin.getUserById(id);
+          e = { email: data.user?.email ?? "", at: now };
+          emailCache.set(id, e);
+        }
+        return [id, e.email] as const;
+      }),
+    ),
+  ]);
   const names = new Map((tm ?? []).map((t) => [t.user_id as string, (t.full_name as string | null) ?? ""]));
-  await Promise.all(
-    uniq.map(async (id) => {
-      const { data } = await db.auth.admin.getUserById(id);
-      const email = data.user?.email ?? "";
-      out.set(id, { name: names.get(id) || email.split("@")[0] || "Unknown", email });
-    }),
-  );
+  for (const [id, email] of emails) out.set(id, { name: names.get(id) || email.split("@")[0] || "Unknown", email });
   return out;
 }
 

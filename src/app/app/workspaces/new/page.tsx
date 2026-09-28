@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { brandForHost } from "@/lib/brand";
 import { userClient } from "@/lib/supabase/server";
+import { orgRanksFor } from "@/lib/org-tree";
 import { requireUser } from "@/lib/tenancy";
 import { TEMPLATES } from "@/core/templates";
 import { TopBar } from "@/components/topbar";
@@ -15,9 +16,9 @@ export default async function NewWorkspace({ searchParams }: { searchParams: Pro
   const sp = await searchParams;
   const user = await requireUser();
   const sb = await userClient();
-  const [{ data: orgs }, { brand }, ctx] = await Promise.all([sb.from("organizations").select("id,name,type,parent_id").order("name"), brandForHost(), teamContext()]);
+  const [{ data: orgs }, { brand }, ctx, rankOf] = await Promise.all([sb.from("organizations").select("id,name,type,parent_id").order("name"), brandForHost(), teamContext(), orgRanksFor(user.id)]);
   // Organizations where this user is an admin or owner (directly or through a parent).
-  const ranks = await Promise.all((orgs ?? []).map(async (o) => ({ o, rank: Number((await sb.rpc("ose_org_rank", { o: o.id })).data ?? 0) })));
+  const ranks = (orgs ?? []).map((o) => ({ o, rank: rankOf.get(o.id) ?? 0 }));
   const manageable = ranks.filter((r) => r.rank >= 4).map((r) => ({ id: r.o.id as string, label: `${r.o.name}${r.o.type !== "platform" ? ` (${r.o.type})` : ""}` }));
   if (!manageable.length) redirect("/app?error=Only%20admins%20can%20add%20workspaces");
 

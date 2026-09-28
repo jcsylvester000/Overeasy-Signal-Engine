@@ -3,6 +3,7 @@ import { env } from "@/lib/env";
 import { nowMs } from "@/lib/time";
 import { brandForHost } from "@/lib/brand";
 import { userClient } from "@/lib/supabase/server";
+import { orgRanksFor } from "@/lib/org-tree";
 import { requireUser, type Org, type Workspace } from "@/lib/tenancy";
 import { TopBar } from "@/components/topbar";
 import { PendingButton } from "@/components/pending-button";
@@ -25,13 +26,13 @@ export default async function AppHome({ searchParams }: { searchParams: Promise<
   }
   const user = await requireUser();
   const sb = await userClient();
-  const [{ data: orgs }, { data: wss }, { brand }] = await Promise.all([sb.from("organizations").select("*").order("name"), sb.from("workspaces").select("*").order("name"), brandForHost()]);
+  const [{ data: orgs }, { data: wss }, { brand }, ranks] = await Promise.all([sb.from("organizations").select("*").order("name"), sb.from("workspaces").select("*").order("name"), brandForHost(), orgRanksFor(user.id)]);
   const all = (wss ?? []) as Workspace[];
   const workspaces = all.filter((w) => !w.archived_at);
   const archived = all.filter((w) => w.archived_at);
   const organizations = (orgs ?? []) as Org[];
   // Effective rank per organization (includes roles inherited from a parent organization).
-  const rankOf = new Map(await Promise.all(organizations.map(async (o) => [o.id, Number((await sb.rpc("ose_org_rank", { o: o.id })).data ?? 0)] as const)));
+  const rankOf = ranks;
   const canManage = (orgId: string) => (rankOf.get(orgId) ?? 0) >= 4;
   const isOwner = (orgId: string) => (rankOf.get(orgId) ?? 0) >= 5;
   const anyAdmin = organizations.some((o) => canManage(o.id));

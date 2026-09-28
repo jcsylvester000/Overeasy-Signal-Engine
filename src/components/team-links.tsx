@@ -7,9 +7,12 @@ import { teamRowsFor } from "@/server/team";
 export async function TeamLinks() {
   const user = await currentUser().catch(() => null);
   if (!user) return null;
-  const rows = await teamRowsFor(user.id).catch(() => []);
+  // Both queries at once (one round trip); the count is simply unused for non-team users.
+  const [rows, { count }] = await Promise.all([
+    teamRowsFor(user.id).catch(() => []),
+    admin().from("notifications").select("id", { count: "exact", head: true }).eq("user_id", user.id).is("read_at", null),
+  ]);
   if (!rows.length) return null;
-  const { count } = await admin().from("notifications").select("id", { count: "exact", head: true }).eq("user_id", user.id).is("read_at", null);
   const n = count ?? 0;
   return (
     <span className="flex items-center gap-3">

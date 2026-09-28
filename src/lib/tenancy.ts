@@ -80,9 +80,8 @@ export const orgAccess = cache(async (orgId: string) => {
   await requireUser();
   if (!/^[0-9a-f-]{36}$/i.test(orgId)) notFound();
   const sb = await userClient();
-  const { data: org } = await sb.from("organizations").select("*").eq("id", orgId).maybeSingle<Org>();
+  const [{ data: org }, { data: rank }] = await Promise.all([sb.from("organizations").select("*").eq("id", orgId).maybeSingle<Org>(), sb.rpc("ose_org_rank", { o: orgId })]);
   if (!org) notFound();
-  const { data: rank } = await sb.rpc("ose_org_rank", { o: orgId });
   return { org, rank: Number(rank ?? 0) };
 });
 
@@ -104,12 +103,9 @@ export async function enforceMfa(orgId: string, rank: number, next: string, chai
     required = chain.some((o) => Boolean((o.settings as { requireMfaForAdmins?: boolean } | null)?.requireMfaForAdmins));
     id = null;
   }
-  const { admin } = await import("@/lib/supabase/admin");
-  const db = admin();
-  for (let i = 0; id && i < 5 && !required; i++) {
-    const res: { data: { parent_id: string | null; settings: { requireMfaForAdmins?: boolean } | null } | null } = await db.from("organizations").select("parent_id,settings").eq("id", id).maybeSingle();
-    required = Boolean(res.data?.settings?.requireMfaForAdmins);
-    id = res.data?.parent_id ?? null;
+  if (id) {
+    const { chainOf, orgTree } = await import("@/lib/org-tree");
+    required = chainOf(await orgTree(), id).some((o) => Boolean((o.settings as { requireMfaForAdmins?: boolean } | null)?.requireMfaForAdmins));
   }
   if (!required) return;
   const sb = await userClient();

@@ -11,9 +11,8 @@ const p = (x: number | null) => (x === null ? "—" : `${(x * 100).toFixed(0)}%`
 export default async function Reports({ params, searchParams }: { params: Promise<{ ws: string }>; searchParams: Promise<{ days?: string }> }) {
   const { ws: wsId } = await params;
   const sp = await searchParams;
-  const { ws } = await requireWorkspace(wsId, 2);
   const days = [30, 90, 180, 365].includes(Number(sp.days)) ? Number(sp.days) : 90;
-  const r = await deepReports(ws.id, days, true);
+  const [{ ws }, r] = await Promise.all([requireWorkspace(wsId, 2), deepReports(wsId, days, true)]);
   const maxBand = Math.max(1, ...r.scoreBands.map((b) => b.leads));
   return (
     <>

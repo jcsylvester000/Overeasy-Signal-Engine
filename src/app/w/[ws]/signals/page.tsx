@@ -12,20 +12,26 @@ const FILTERS = ["all", "pending", "sent", "dry_run", "test", "dead", "blocked_w
 export default async function Signals({ params, searchParams }: { params: Promise<{ ws: string }>; searchParams: Promise<{ status?: string; saved?: string }> }) {
   const { ws: wsId } = await params;
   const sp = await searchParams;
-  const { ws, rank } = await requireWorkspace(wsId);
   const sb = await userClient();
-  let q = sb.from("signal_jobs").select("*").eq("workspace_id", ws.id).order("created_at", { ascending: false }).limit(200);
+  let q = sb.from("signal_jobs").select("*").eq("workspace_id", wsId).order("created_at", { ascending: false }).limit(200);
   if (sp.status && sp.status !== "all") q = q.eq("status", sp.status);
-  const { data: jobs } = await q;
 
   // Weekly reconciliation (DEL-06): CRM stage changes vs signals created vs accepted.
   const since = new Date(nowMs() - 7 * 86_400_000).toISOString();
-  const [{ data: ev }, { data: wk }] = await Promise.all([
-    sb.from("stage_events").select("canonical_stage").eq("workspace_id", ws.id).gte("occurred_at", since).neq("canonical_stage", "lost"),
-    sb.from("signal_jobs").select("canonical_stage,status").eq("workspace_id", ws.id).gte("created_at", since),
+  const countPending = (pl: string) => sb.from("signal_jobs").select("id", { count: "exact", head: true }).eq("workspace_id", wsId).eq("platform", pl).eq("status", "dry_run").gt("value_increment", 0).is("exported_at", null);
+  // One round trip: access check + all queries (RLS protects the reads).
+  const [{ ws, rank }, { data: jobs }, { data: ev }, { data: wk }, gc, mc] = await Promise.all([
+    requireWorkspace(wsId),
+    q,
+    sb.from("stage_events").select("canonical_stage").eq("workspace_id", wsId).gte("occurred_at", since).neq("canonical_stage", "lost"),
+    sb.from("signal_jobs").select("canonical_stage,status").eq("workspace_id", wsId).gte("created_at", since),
+    countPending("google"),
+    countPending("microsoft"),
   ]);
-  const countPending = (pl: string) => sb.from("signal_jobs").select("id", { count: "exact", head: true }).eq("workspace_id", ws.id).eq("platform", pl).eq("status", "dry_run").gt("value_increment", 0).is("exported_at", null);
-  const [gc, mc] = rank >= 3 ? await Promise.all([countPending("google"), countPending("microsoft")]) : [{ count: 0 }, { count: 0 }];
+  if (rank < 3) {
+    gc.count = 0;
+    mc.count = 0;
+  }
   const pendingExport = { google: gc.count ?? 0, microsoft: mc.count ?? 0 };
   const stages = ["submitted", "qualified", "opportunity", "contract", "sold", "funded"];
   const recon = stages.map((s) => ({

@@ -8,6 +8,7 @@ import { sanitizeBrand } from "@/lib/brand";
 import { requireOrg, requireUser, ROLES } from "@/lib/tenancy";
 import { createWorkspace, inviteMember, slugify } from "@/server/provision";
 import { addDomainAliases } from "@/server/domains";
+import { invalidateOrgTree } from "@/lib/org-tree";
 
 const back = (orgId: string, q = "") => redirect(`/org/${orgId}${q}`);
 
@@ -26,6 +27,7 @@ export async function saveBrand(orgId: string, fd: FormData) {
   const domain = String(fd.get("custom_domain") ?? "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "") || null;
   const tag = String(fd.get("tag_domain") ?? "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "") || null;
   const { error } = await admin().from("organizations").update({ brand, custom_domain: domain, tag_domain: tag }).eq("id", org.id);
+  invalidateOrgTree();
   if (error) back(orgId, `?error=${encodeURIComponent(error.message)}`);
   await audit({ orgId, actorId: user.id, action: "org.brand.update", entity: "organization", entityId: orgId, diff: { brand, domain, tag } });
   const dns = domain || tag ? await addDomainAliases([domain, tag]) : null;
@@ -90,6 +92,7 @@ export async function addChildOrg(orgId: string, fd: FormData) {
     .select("id")
     .single();
   if (error || !data) back(orgId, `?error=${encodeURIComponent(error?.message ?? "Create failed")}`);
+  invalidateOrgTree();
   await audit({ orgId, actorId: user.id, action: "org.create", entity: "organization", entityId: data!.id, diff: { name, type } });
   redirect(`/org/${data!.id}`);
 }
@@ -106,6 +109,7 @@ export async function saveSecurity(orgId: string, fd: FormData) {
     if (data?.currentLevel !== "aal2") back(orgId, "?error=Turn%20on%20two-factor%20for%20your%20own%20account%20first%20(Account%20page)");
   }
   await admin().from("organizations").update({ settings }).eq("id", orgId);
+  invalidateOrgTree();
   await audit({ orgId, actorId: user.id, action: "org.security", entity: "organization", entityId: orgId, diff: settings });
   revalidatePath(`/org/${orgId}`);
   back(orgId, "?saved=security");

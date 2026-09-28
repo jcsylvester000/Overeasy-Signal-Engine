@@ -3,7 +3,8 @@ import { admin } from "@/lib/supabase/admin";
 import { brandForOrg, sanitizeBrand } from "@/lib/brand";
 import { enforceMfa, requireOrg, requireUser, ROLE_LABEL, ROLES, type Org, type Workspace } from "@/lib/tenancy";
 import { TopBar } from "@/components/topbar";
-import { nowMs } from "@/lib/time";
+import { userLabels, workspaceMetrics } from "@/server/team";
+import { orgTree } from "@/lib/org-tree";
 import { Badge, Button, Card, Field, Notice, PageHeader, Table, Td } from "@/components/ui";
 import { addChildOrg, invite, removeMember, saveBrand, saveSecurity } from "./actions";
 
@@ -16,37 +17,38 @@ export default async function OrgPage({ params, searchParams }: { params: Promis
   const { org, rank } = await requireOrg(orgId, 4);
   await enforceMfa(orgId, rank, `/org/${orgId}`);
   const db = admin();
-  const [{ data: usage }, { data: wss }, { data: members }, { data: children }, brand] = await Promise.all([
+  // Children come from the cached org tree, so every query below starts at once (two round trips in total).
+  const tree = await orgTree();
+  const children = tree.filter((o) => o.parent_id === orgId).sort((x, y) => x.name.localeCompare(y.name)) as unknown as Org[];
+  const childIds = children.map((c) => c.id);
+  const [{ data: usage }, { data: wss }, { data: members }, brand, { data: allWs }] = await Promise.all([
     db.from("usage_monthly").select("*").eq("org_id", orgId).order("month", { ascending: false }).limit(60),
     db.from("workspaces").select("*").eq("org_id", orgId).is("archived_at", null).order("name"),
     db.from("memberships").select("id,user_id,workspace_id,role,created_at").eq("org_id", orgId),
-    db.from("organizations").select("*").eq("parent_id", orgId).order("name"),
     brandForOrg(orgId),
+    // Partner console (P-03): health across this organization's and its child organizations' client workspaces.
+    db.from("workspaces").select("id,name,org_id,settings").in("org_id", [orgId, ...childIds]).is("archived_at", null),
   ]);
   const workspaces = (wss ?? []) as Workspace[];
-  // Partner console (P-03): health across this organization's and its child organizations' client workspaces.
-  const childIds = ((children ?? []) as Org[]).map((c) => c.id);
-  const { data: allWs } = await db.from("workspaces").select("id,name,org_id,settings").in("org_id", [orgId, ...childIds]).is("archived_at", null);
-  const since = new Date(nowMs() - 30 * 86_400_000).toISOString();
-  const health = await Promise.all(
-    (allWs ?? []).map(async (w) => {
-      const [{ count: leads30 }, { count: alertsOpen }, { data: cs }, { data: st }, { count: failed }] = await Promise.all([
-        db.from("leads").select("id", { count: "exact", head: true }).eq("workspace_id", w.id).gte("created_at", since),
-        db.from("alerts").select("id", { count: "exact", head: true }).eq("workspace_id", w.id).neq("status", "resolved"),
-        db.from("connections").select("provider,mode,status").eq("workspace_id", w.id).neq("status", "disconnected"),
-        db.from("sites").select("last_event_at").eq("workspace_id", w.id),
-        db.from("signal_jobs").select("id", { count: "exact", head: true }).eq("workspace_id", w.id).in("status", ["dead", "failed"]).gte("created_at", since),
-      ]);
-      const lastTag = (st ?? []).map((x) => x.last_event_at).filter(Boolean).sort().at(-1) ?? null;
-      return { w, leads30: leads30 ?? 0, alertsOpen: alertsOpen ?? 0, conns: cs ?? [], lastTag, failed: failed ?? 0 };
-    }),
-  );
+  const wsIds = (allWs ?? []).map((w) => w.id as string);
+  const [metrics, { data: connRows }, labels] = await Promise.all([
+    workspaceMetrics(wsIds),
+    wsIds.length ? db.from("connections").select("workspace_id,provider,mode,status").in("workspace_id", wsIds).neq("status", "disconnected") : Promise.resolve({ data: [] as { workspace_id: string; provider: string; mode: string; status: string }[] }),
+    userLabels((members ?? []).map((m) => m.user_id)),
+  ]);
+  const health = (allWs ?? []).map((w) => {
+    const m = metrics.get(w.id);
+    return {
+      w,
+      leads30: m?.leads_30d ?? 0,
+      alertsOpen: m?.alerts_open ?? 0,
+      conns: (connRows ?? []).filter((c) => c.workspace_id === w.id),
+      lastTag: m?.last_tag_event ?? null,
+      failed: m?.failed_30d ?? 0,
+    };
+  });
   const own = sanitizeBrand(org.brand as never);
-  const emails = new Map<string, string>();
-  for (const m of members ?? []) {
-    const { data } = await db.auth.admin.getUserById(m.user_id);
-    if (data.user?.email) emails.set(m.user_id, data.user.email);
-  }
+  const emails = new Map([...labels].map(([id, l]) => [id, l.email]));
 
   return (
     <>
@@ -94,7 +96,7 @@ export default async function OrgPage({ params, searchParams }: { params: Promis
                     </span>
                   )}
                 </Td>
-                <Td className="text-xs">{h.w.org_id === orgId ? org.name : (((children ?? []) as Org[]).find((c) => c.id === h.w.org_id)?.name ?? "")}</Td>
+                <Td className="text-xs">{h.w.org_id === orgId ? org.name : (children.find((c) => c.id === h.w.org_id)?.name ?? "")}</Td>
                 <Td className="num">{h.leads30}</Td>
                 <Td className="num">{h.alertsOpen ? <Badge tone="amber">{h.alertsOpen}</Badge> : 0}</Td>
                 <Td className="num">{h.failed ? <Badge tone="red">{h.failed}</Badge> : 0}</Td>
@@ -223,7 +225,7 @@ export default async function OrgPage({ params, searchParams }: { params: Promis
         {org.type !== "direct" && (
           <Card title={org.type === "platform" ? "Partner agencies & direct clients" : "Client organizations"}>
             <ul className="mb-4 space-y-1 text-sm">
-              {((children ?? []) as Org[]).map((c) => (
+              {children.map((c) => (
                 <li key={c.id}>
                   <Link className="text-brand hover:underline" href={`/org/${c.id}`}>
                     {c.name}
@@ -231,7 +233,7 @@ export default async function OrgPage({ params, searchParams }: { params: Promis
                   <Badge>{c.type}</Badge>
                 </li>
               ))}
-              {!children?.length && <li className="text-muted">None yet.</li>}
+              {!children.length && <li className="text-muted">None yet.</li>}
             </ul>
             <form action={addChildOrg.bind(null, orgId)} className="flex flex-wrap items-end gap-3 border-t border-line pt-4">
               <Field label="Name">

@@ -8,9 +8,10 @@ export const metadata = { title: "Health" };
 export default async function Health({ params, searchParams }: { params: Promise<{ ws: string }>; searchParams: Promise<{ saved?: string; error?: string }> }) {
   const { ws: wsId } = await params;
   const sp = await searchParams;
-  const { ws, rank } = await requireWorkspace(wsId);
   const sb = await userClient();
-  const [{ data: alerts }, { data: conns }, { data: sites }, { data: autos }, { data: ops }, { data: inbox }] = await Promise.all([
+  const ws = { id: wsId };
+  const [{ rank }, { data: alerts }, { data: conns }, { data: sites }, { data: autos }, { data: ops }, { data: inbox }] = await Promise.all([
+    requireWorkspace(wsId),
     sb.from("alerts").select("*").eq("workspace_id", ws.id).neq("status", "resolved").order("created_at", { ascending: false }).limit(100),
     sb.from("connections").select("id,provider,display_name,mode,status,last_ok_at,error").eq("workspace_id", ws.id),
     sb.from("sites").select("id,domain,last_event_at").eq("workspace_id", ws.id),

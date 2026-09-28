@@ -9,18 +9,17 @@ export const metadata = { title: "Leads" };
 export default async function Leads({ params, searchParams }: { params: Promise<{ ws: string }>; searchParams: Promise<{ stage?: string; type?: string; page?: string }> }) {
   const { ws: wsId } = await params;
   const sp = await searchParams;
-  const { ws } = await requireWorkspace(wsId);
   const sb = await userClient();
   const page = Math.max(0, Number(sp.page ?? 0));
   let q = sb
     .from("leads")
     .select("id,created_at,source,form,score,score_capped,lead_type,velocity_band,canonical_stage,value_current,geo,attribution,window_expires_on,is_test", { count: "exact" })
-    .eq("workspace_id", ws.id)
+    .eq("workspace_id", wsId)
     .order("created_at", { ascending: false })
     .range(page * 50, page * 50 + 49);
   if (sp.stage) q = q.eq("canonical_stage", sp.stage);
   if (sp.type) q = q.eq("lead_type", sp.type);
-  const { data: leads, count } = await q;
+  const [{ ws }, { data: leads, count }] = await Promise.all([requireWorkspace(wsId), q]);
   const base = `/w/${ws.id}/leads`;
   const link = (p: Record<string, string | undefined>) => `${base}?${new URLSearchParams(Object.entries({ ...sp, ...p }).filter(([, v]) => v !== undefined) as [string, string][])}`;
 

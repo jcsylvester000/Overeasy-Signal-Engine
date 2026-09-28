@@ -19,6 +19,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="en">
       <head>
+        {/* Netlify's edge injects an HTML comment + whitespace into <head> after <meta charset>; React then fails
+            hydration (#418) and re-renders the page. Strip those nodes before React hydrates. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){var h=document.head;if(!h)return;for(var n=h.firstChild;n;){var x=n.nextSibling;if(n.nodeType===8||(n.nodeType===3&&!/\\S/.test(n.nodeValue||"")))h.removeChild(n);n=x;}})();`,
+          }}
+        />
         {brand.theme === "overeasy" && (
           <>
             <link rel="preconnect" href="https://fonts.googleapis.com" />

@@ -1,7 +1,7 @@
 import "server-only";
 import { cache } from "react";
 import { headers } from "next/headers";
-import { admin } from "@/lib/supabase/admin";
+import { chainOf, orgTree } from "@/lib/org-tree";
 import { env } from "@/lib/env";
 
 /** White-label brand (ADM-02). No platform name is hard-coded in the client UI. */
@@ -78,22 +78,11 @@ function resolveChain(ordered: { type: string; brand: unknown }[]): Brand {
   return ordered.reduce<Brand>((acc, o) => ({ ...acc, ...sanitizeBrand(o.brand as Partial<Brand>) }), platformBase());
 }
 
-type OrgRow = { id: string; parent_id: string | null; type: string; brand: Partial<Brand> | null };
-
-/** Brand for an organization: its own values over its parents' values over the platform default. */
+/** Brand for an organization: its own values over its parents' values over the platform default (org tree cached in memory). */
 export const brandForOrg = cache(async (orgId: string | null | undefined): Promise<Brand> => {
   if (!orgId || !env.isConfigured()) return platformBase();
   try {
-    const chain: OrgRow[] = [];
-    let id: string | null = orgId;
-    for (let i = 0; id && i < 5; i++) {
-      const { data }: { data: OrgRow | null } = await admin().from("organizations").select("id,parent_id,type,brand").eq("id", id).maybeSingle<OrgRow>();
-      if (!data) break;
-      chain.unshift(data);
-      id = data.parent_id;
-    }
-    // Partners must never inherit the platform's name or logo.
-    return resolveChain(chain);
+    return resolveChain(chainOf(await orgTree(), orgId));
   } catch {
     return platformBase();
   }
@@ -117,9 +106,10 @@ export const brandForHost = cache(async (): Promise<{ brand: Brand; orgId: strin
   // Platform domain (no partner custom domain matched): platform brand.
   if (!host || !env.isConfigured()) return { brand: platformBase(), orgId: null };
   try {
-    const { data } = await admin().from("organizations").select("id").eq("custom_domain", host).maybeSingle<{ id: string }>();
-    if (!data) return { brand: platformBase(), orgId: null };
-    return { brand: await brandForOrg(data.id), orgId: data.id };
+    const nodes = await orgTree();
+    const org = nodes.find((o) => o.custom_domain === host);
+    if (!org) return { brand: platformBase(), orgId: null };
+    return { brand: resolveChain(chainOf(nodes, org.id)), orgId: org.id };
   } catch {
     return { brand: platformBase(), orgId: null };
   }

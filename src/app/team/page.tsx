@@ -15,18 +15,19 @@ export default async function MyBoard({ searchParams }: { searchParams: Promise<
   const ctx = await requireTeam(1);
   const now = nowMs();
   const db = admin();
-  const L = await lookups(ctx);
-  const mine = ctx.rank >= 2 && ctx.assigned.length === 0 ? L.wss : L.wss.filter((w) => ctx.assigned.includes(w.id));
   const endOfDay = new Date(now);
   endOfDay.setUTCHours(23, 59, 59, 999);
 
-  const [metrics, { data: tasks }, { data: reminders }, { data: notes }, { count: unread }] = await Promise.all([
-    workspaceMetrics(mine.map((w) => w.id)),
+  // Lookups and the board's own queries in parallel; workspace metrics follow once the scope is known.
+  const [L, { data: tasks }, { data: reminders }, { data: notes }, { count: unread }] = await Promise.all([
+    lookups(ctx),
     db.from("team_tasks").select("*").eq("team_org_id", ctx.orgId).eq("assignee_id", ctx.user.id).neq("status", "done").order("due_at", { ascending: true, nullsFirst: false }).limit(50),
     db.from("team_reminders").select("id,note,remind_at,workspace_id,sent_at").eq("user_id", ctx.user.id).gte("remind_at", new Date(now - 86_400_000).toISOString()).order("remind_at").limit(10),
     db.from("notifications").select("id,title,link,created_at,read_at,kind").eq("user_id", ctx.user.id).order("created_at", { ascending: false }).limit(6),
     db.from("notifications").select("id", { count: "exact", head: true }).eq("user_id", ctx.user.id).is("read_at", null),
   ]);
+  const mine = ctx.rank >= 2 && ctx.assigned.length === 0 ? L.wss : L.wss.filter((w) => ctx.assigned.includes(w.id));
+  const metrics = await workspaceMetrics(mine.map((w) => w.id));
   const myTasks = (tasks ?? []) as TaskRow[];
   const overdue = myTasks.filter((t) => t.due_at && new Date(t.due_at).getTime() < now).length;
   const today = myTasks.filter((t) => t.due_at && new Date(t.due_at).getTime() >= now && new Date(t.due_at).getTime() <= endOfDay.getTime()).length;

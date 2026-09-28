@@ -24,8 +24,8 @@ type SP = { saved?: string; error?: string; view?: string; days?: string; grain?
 export default async function Spend({ params, searchParams }: { params: Promise<{ ws: string }>; searchParams: Promise<SP> }) {
   const { ws: wsId } = await params;
   const sp = await searchParams;
-  const { ws, rank } = await requireWorkspace(wsId, 2);
   const sb = await userClient();
+  const accessP = requireWorkspace(wsId, 2); // started now, awaited together with the data queries
 
   const view = VIEWS.some((v) => v.id === sp.view) ? (sp.view as (typeof VIEWS)[number]["id"]) : "overview";
   const days = RANGES.includes(Number(sp.days)) ? Number(sp.days) : 30;
@@ -34,17 +34,17 @@ export default async function Spend({ params, searchParams }: { params: Promise<
   const campaignFilter = sp.campaign?.slice(0, 200) || "";
   const page = Math.max(0, Number(sp.page ?? 0) || 0);
   const from = new Date(nowMs() - days * 86_400_000).toISOString();
-  const fmt = (n: number) => money(n, ws.currency);
-  const cur = (n: number | null, digits = 2) => (n === null ? "—" : new Intl.NumberFormat("en-US", { style: "currency", currency: ws.currency, maximumFractionDigits: digits }).format(n));
   const pct = (n: number | null) => (n === null ? "—" : `${(n * 100).toFixed(2)}%`);
   const x = (n: number | null) => (n === null ? "—" : `${n.toFixed(1)}×`);
 
   // Spend (all rows in range for analytics; the Daily data view paginates separately).
-  let sq = sb.from("ad_spend_daily").select("date,platform,campaign,campaign_id,cost,clicks,impressions").eq("workspace_id", ws.id).gte("date", from.slice(0, 10)).limit(20000);
+  let sq = sb.from("ad_spend_daily").select("date,platform,campaign,campaign_id,cost,clicks,impressions").eq("workspace_id", wsId).gte("date", from.slice(0, 10)).limit(20000);
   if (platform !== "all") sq = sq.eq("platform", platform);
   if (campaignFilter) sq = sq.or(`campaign.eq.${JSON.stringify(campaignFilter)},campaign_id.eq.${JSON.stringify(campaignFilter)}`);
-  const leadsQ = sb.from("leads").select("created_at,canonical_stage,value_current,attribution").eq("workspace_id", ws.id).eq("is_test", false).gte("created_at", from).limit(20000);
-  const [{ data: spendRaw }, { data: leadsRaw }] = await Promise.all([sq, leadsQ]);
+  const leadsQ = sb.from("leads").select("created_at,canonical_stage,value_current,attribution").eq("workspace_id", wsId).eq("is_test", false).gte("created_at", from).limit(20000);
+  const [{ ws, rank }, { data: spendRaw }, { data: leadsRaw }] = await Promise.all([accessP, sq, leadsQ]);
+  const fmt = (n: number) => money(n, ws.currency);
+  const cur = (n: number | null, digits = 2) => (n === null ? "—" : new Intl.NumberFormat("en-US", { style: "currency", currency: ws.currency, maximumFractionDigits: digits }).format(n));
 
   const spend: SpendRow[] = (spendRaw ?? []).map((r) => ({ ...r, cost: Number(r.cost), clicks: Number(r.clicks), impressions: Number(r.impressions) }));
   const leads: LeadRow[] = (leadsRaw ?? [])

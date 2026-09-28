@@ -31,10 +31,10 @@ function Breakdown({ rows, currency, spend }: { rows: Row[]; currency: string; s
 export default async function Overview({ params, searchParams }: { params: Promise<{ ws: string }>; searchParams: Promise<{ days?: string; test?: string; denied?: string; welcome?: string }> }) {
   const { ws: wsId } = await params;
   const sp = await searchParams;
-  const { ws } = await requireWorkspace(wsId);
   const days = [7, 30, 90, 365].includes(Number(sp.days)) ? Number(sp.days) : 30;
   const includeTest = sp.test !== "0";
-  const r = await overview(ws.id, days, includeTest);
+  // Access check and report queries run together (the queries go through RLS, so they are safe to start early).
+  const [{ ws }, r] = await Promise.all([requireWorkspace(wsId), overview(wsId, days, includeTest)]);
   const max = Math.max(1, ...r.funnel.map((f) => f.count));
   const qs = (d: number, t: boolean) => `?days=${d}&test=${t ? 1 : 0}`;
 

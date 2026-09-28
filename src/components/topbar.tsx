@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import type { Brand } from "@/lib/brand";
 import { TeamLinks } from "./team-links";
 
@@ -18,7 +19,10 @@ export function TopBar({ brand, email, children }: { brand: Brand; email?: strin
         <div className="flex-1 text-sm">{children}</div>
         {email && (
           <div className="flex items-center gap-4 text-sm">
-            <TeamLinks />
+            {/* Streams in after the page shell: never delays the page. */}
+            <Suspense fallback={null}>
+              <TeamLinks />
+            </Suspense>
             <Link href="/app/account" className="hidden text-muted hover:text-ink sm:inline">
               {email}
             </Link>

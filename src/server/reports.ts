@@ -32,15 +32,18 @@ export async function overview(workspaceId: string, days: number, includeTest: b
   const from = new Date(Date.now() - days * 86_400_000).toISOString();
   let q = sb.from("leads").select("id,created_at,score,score_capped,lead_type,canonical_stage,value_current,geo,attribution,is_test").eq("workspace_id", workspaceId).gte("created_at", from).limit(5000);
   if (!includeTest) q = q.eq("is_test", false);
-  const { data: leadsRaw } = await q;
+  // Leads and spend in parallel, then all stage-event batches in parallel (2 round trips instead of 3+).
+  const [{ data: leadsRaw }, { data: spendRows }] = await Promise.all([q, sb.from("ad_spend_daily").select("platform,campaign,campaign_id,geo,cost").eq("workspace_id", workspaceId).gte("date", from.slice(0, 10))]);
   const leads = (leadsRaw ?? []) as Lead[];
   const ids = leads.map((l) => l.id);
 
   // Highest rung reached per lead + first time it reached each rung.
   const reached = new Map<string, number>();
   const firstAt = new Map<string, Map<string, string>>();
-  for (let i = 0; i < ids.length; i += 500) {
-    const { data: ev } = await sb.from("stage_events").select("lead_id,canonical_stage,occurred_at").in("lead_id", ids.slice(i, i + 500));
+  const batches: string[][] = [];
+  for (let i = 0; i < ids.length; i += 300) batches.push(ids.slice(i, i + 300));
+  const evs = await Promise.all(batches.map((b) => sb.from("stage_events").select("lead_id,canonical_stage,occurred_at").in("lead_id", b)));
+  for (const { data: ev } of evs) {
     for (const e of ev ?? []) {
       const r = rungIndex(e.canonical_stage);
       if (r > (reached.get(e.lead_id) ?? -1)) reached.set(e.lead_id, r);
@@ -54,7 +57,6 @@ export async function overview(workspaceId: string, days: number, includeTest: b
   const lost = leads.filter((l) => l.canonical_stage === "lost").length;
   const totalValue = leads.reduce((s, l) => s + Number(l.value_current ?? 0), 0);
 
-  const { data: spendRows } = await sb.from("ad_spend_daily").select("platform,campaign,campaign_id,geo,cost").eq("workspace_id", workspaceId).gte("date", from.slice(0, 10));
   const spendTotal = (spendRows ?? []).reduce((s, r) => s + Number(r.cost), 0);
 
   function group(keyOf: (l: Lead) => string, spendOf?: (key: string) => number): Row[] {
@@ -131,8 +133,10 @@ export async function deepReports(workspaceId: string, days: number, includeTest
   const leads = data ?? [];
   const ids = leads.map((l) => l.id as string);
   const firstAt = new Map<string, Record<string, number>>();
-  for (let i = 0; i < ids.length; i += 500) {
-    const { data: ev } = await sb.from("stage_events").select("lead_id,canonical_stage,occurred_at").in("lead_id", ids.slice(i, i + 500));
+  const batches: string[][] = [];
+  for (let i = 0; i < ids.length; i += 300) batches.push(ids.slice(i, i + 300));
+  const evs = await Promise.all(batches.map((b) => sb.from("stage_events").select("lead_id,canonical_stage,occurred_at").in("lead_id", b)));
+  for (const { data: ev } of evs) {
     for (const e of ev ?? []) {
       const m = firstAt.get(e.lead_id) ?? {};
       const t = Date.parse(e.occurred_at);
