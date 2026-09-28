@@ -47,8 +47,8 @@ export default async function AppHome({ searchParams }: { searchParams: Promise<
               <form action={createDemo.bind(null, firstAdminOrg)}>
                 <PendingButton pendingText="Building demo data… (about 10–20 seconds)">Create demo workspace</PendingButton>
               </form>
-              <Link href={`/org/${firstAdminOrg}`} className="rounded-md border border-line px-3 py-1.5 text-sm hover:bg-gray-50">
-                Create a real client workspace
+              <Link href={`/org/${firstAdminOrg}/workspaces/new`} className="rounded-md border border-line px-3 py-1.5 text-sm hover:bg-gray-50">
+                + Add a real client workspace
               </Link>
             </div>
           </Card>
@@ -56,6 +56,7 @@ export default async function AppHome({ searchParams }: { searchParams: Promise<
         <div className="space-y-6">
           {organizations.map((o) => {
             const list = workspaces.filter((w) => w.org_id === o.id);
+            const canManage = adminOrgs.has(o.id) || adminOrgs.has(o.parent_id ?? "");
             return (
               <Card
                 key={o.id}
@@ -65,14 +66,19 @@ export default async function AppHome({ searchParams }: { searchParams: Promise<
                   </span>
                 }
                 actions={
-                  adminOrgs.size && (adminOrgs.has(o.id) || adminOrgs.has(o.parent_id ?? "")) ? (
-                    <Link className="text-sm text-brand hover:underline" href={`/org/${o.id}`}>
-                      Manage organization →
-                    </Link>
+                  canManage ? (
+                    <span className="flex items-center gap-4">
+                      <Link className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white hover:opacity-90" href={`/org/${o.id}/workspaces/new`}>
+                        + Add workspace
+                      </Link>
+                      <Link className="text-sm text-brand hover:underline" href={`/org/${o.id}`}>
+                        Manage organization →
+                      </Link>
+                    </span>
                   ) : undefined
                 }
               >
-                {list.length ? (
+                {list.length || canManage ? (
                   <ul className="grid gap-2 sm:grid-cols-2">
                     {list.map((w) => (
                       <li key={w.id}>
@@ -87,6 +93,16 @@ export default async function AppHome({ searchParams }: { searchParams: Promise<
                         </Link>
                       </li>
                     ))}
+                    {canManage && (
+                      <li>
+                        <Link
+                          href={`/org/${o.id}/workspaces/new`}
+                          className="flex h-full min-h-[4.25rem] items-center justify-center gap-2 rounded-md border border-dashed border-line p-3 text-sm text-muted hover:border-brand hover:text-ink"
+                        >
+                          <span aria-hidden className="text-lg leading-none">+</span> Add workspace
+                        </Link>
+                      </li>
+                    )}
                   </ul>
                 ) : (
                   <p className="text-sm text-muted">No workspaces yet.</p>

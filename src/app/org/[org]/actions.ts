@@ -52,6 +52,54 @@ export async function addWorkspace(orgId: string, fd: FormData) {
   redirect(`/w/${id}`);
 }
 
+export type WizardState = { error?: string } | null;
+
+/** Step wizard: creates the workspace (+ website, + optional client invite) and opens its setup checklist. */
+export async function createWorkspaceWizard(orgId: string, _prev: WizardState, fd: FormData): Promise<WizardState> {
+  const user = await requireUser();
+  await requireOrg(orgId, 4);
+  const name = String(fd.get("name") ?? "").trim();
+  if (name.length < 2) return { error: "Enter the client or business name." };
+  if (!fd.get("attest")) return { error: "Please confirm the data attestation on the last step." };
+  const template = String(fd.get("template") ?? "land-acquisition");
+  const domain = String(fd.get("domain") ?? "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  if (domain && !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(domain)) return { error: "The website domain looks wrong. Use a form like example.com." };
+  const inviteEmail = String(fd.get("invite_email") ?? "").trim().toLowerCase();
+  const inviteRole = String(fd.get("invite_role") ?? "client_viewer");
+  if (inviteEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inviteEmail)) return { error: "The invite email looks wrong." };
+  if (inviteEmail && !["client_viewer", "analyst", "manager"].includes(inviteRole)) return { error: "Invalid role for the client user." };
+
+  let id: string;
+  try {
+    id = await createWorkspace({
+      orgId,
+      name,
+      templateId: template,
+      domain: domain || undefined,
+      timezone: String(fd.get("timezone") ?? "") || undefined,
+      currency: String(fd.get("currency") ?? "") || undefined,
+      actorId: user.id,
+    });
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Could not create the workspace." };
+  }
+  await audit({ orgId, workspaceId: id, actorId: user.id, action: "workspace.create", entity: "workspace", entityId: id, diff: { name, template, via: "wizard", attestation: "not child-directed; no sensitive data beyond template flags; client discloses ad-platform sharing (v1)" } });
+
+  let note = "Workspace created. Work through the checklist below to go live.";
+  if (inviteEmail) {
+    try {
+      await inviteMember({ email: inviteEmail, orgId, workspaceId: id, role: inviteRole });
+      await audit({ orgId, workspaceId: id, actorId: user.id, action: "member.invite", entity: "membership", diff: { role: inviteRole, workspaceId: id } });
+      note = `Workspace created and ${inviteEmail} invited. Work through the checklist below to go live.`;
+    } catch (e) {
+      note = `Workspace created, but the invite failed (${e instanceof Error ? e.message : "error"}). Invite them from the organization page.`;
+    }
+  }
+  revalidatePath("/app");
+  revalidatePath(`/org/${orgId}`);
+  redirect(`/w/${id}/setup?welcome=${encodeURIComponent(note)}`);
+}
+
 export async function invite(orgId: string, fd: FormData) {
   const user = await requireUser();
   await requireOrg(orgId, 4);

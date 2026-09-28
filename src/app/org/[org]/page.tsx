@@ -2,11 +2,10 @@ import Link from "next/link";
 import { admin } from "@/lib/supabase/admin";
 import { brandForOrg, sanitizeBrand } from "@/lib/brand";
 import { enforceMfa, requireOrg, requireUser, ROLE_LABEL, ROLES, type Org, type Workspace } from "@/lib/tenancy";
-import { TEMPLATES } from "@/core/templates";
 import { TopBar } from "@/components/topbar";
 import { nowMs } from "@/lib/time";
 import { Badge, Button, Card, Field, Notice, PageHeader, Table, Td } from "@/components/ui";
-import { addChildOrg, addWorkspace, invite, removeMember, saveBrand, saveSecurity } from "./actions";
+import { addChildOrg, invite, removeMember, saveBrand, saveSecurity } from "./actions";
 import { createDemo } from "@/app/app/actions";
 import { PendingButton } from "@/components/pending-button";
 
@@ -62,8 +61,15 @@ export default async function OrgPage({ params, searchParams }: { params: Promis
         {sp.saved && <Notice tone="green">Saved.</Notice>}
         {sp.note && <Notice>{sp.note}</Notice>}
 
-        <Card title="Client workspaces">
-          <ul className="mb-4 grid gap-2 sm:grid-cols-2">
+        <Card
+          title="Client workspaces"
+          actions={
+            <Link href={`/org/${orgId}/workspaces/new?from=org`} className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white hover:opacity-90">
+              + Add workspace
+            </Link>
+          }
+        >
+          <ul className="grid gap-2 sm:grid-cols-2">
             {workspaces.map((w) => (
               <li key={w.id}>
                 <Link href={`/w/${w.id}`} className="block rounded-md border border-line p-3 hover:border-brand">
@@ -74,42 +80,6 @@ export default async function OrgPage({ params, searchParams }: { params: Promis
             ))}
             {!workspaces.length && <li className="text-sm text-muted">No workspaces yet.</li>}
           </ul>
-          <form action={addWorkspace.bind(null, orgId)} className="grid gap-3 border-t border-line pt-4 sm:grid-cols-3">
-            <Field label="Client / business name">
-              <input name="name" required placeholder="Acme Land Co" />
-            </Field>
-            <Field label="Industry template">
-              <select name="template" defaultValue="land-acquisition">
-                {TEMPLATES.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Website domain (optional)">
-              <input name="domain" placeholder="example.com" />
-            </Field>
-            <Field label="Timezone">
-              <input name="timezone" defaultValue="America/New_York" />
-            </Field>
-            <Field label="Currency">
-              <select name="currency" defaultValue="USD">
-                {["USD", "CAD", "GBP", "EUR", "AUD", "PHP"].map((c) => (
-                  <option key={c}>{c}</option>
-                ))}
-              </select>
-            </Field>
-            <label className="flex items-start gap-2 text-xs sm:col-span-3">
-              <input type="checkbox" name="attest" required className="mt-0.5" />
-              <span>
-                I confirm this client&apos;s forms are not directed at children under 13, will not collect health, criminal or other sensitive data unless the workspace is set as a regulated vertical, and the client&apos;s privacy policy discloses sharing with ad platforms. (Legal intake starts as a regulated vertical.)
-              </span>
-            </label>
-            <div className="flex items-end">
-              <Button>Create workspace</Button>
-            </div>
-          </form>
         </Card>
 
         <Card title="Client health" description="Every client workspace under this organization and its client organizations (last 30 days).">

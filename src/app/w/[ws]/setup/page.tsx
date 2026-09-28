@@ -2,15 +2,16 @@ import Link from "next/link";
 import { requireWorkspace } from "@/lib/tenancy";
 import { admin } from "@/lib/supabase/admin";
 import { effectiveMode } from "@/lib/env";
-import { Badge, Card, PageHeader } from "@/components/ui";
+import { Badge, Card, Notice, PageHeader } from "@/components/ui";
 
 export const metadata = { title: "Setup" };
 
 type Step = { title: string; detail: string; done: boolean; href: string; cta: string };
 
 /** P-05: onboarding checklist — template → CRM → ads → tag → mapping → test → observation → bidding. */
-export default async function Setup({ params }: { params: Promise<{ ws: string }> }) {
+export default async function Setup({ params, searchParams }: { params: Promise<{ ws: string }>; searchParams: Promise<{ welcome?: string }> }) {
   const { ws: wsId } = await params;
+  const { welcome } = await searchParams;
   const { ws } = await requireWorkspace(wsId, 3);
   const db = admin();
   const base = `/w/${ws.id}`;
@@ -42,6 +43,11 @@ export default async function Setup({ params }: { params: Promise<{ ws: string }
   const doneCount = steps.filter((s) => s.done).length;
   return (
     <>
+      {welcome && (
+        <div className="mb-4">
+          <Notice tone="green">{welcome.slice(0, 300)}</Notice>
+        </div>
+      )}
       <PageHeader title="Setup" description={`Onboarding for ${ws.name}. ${doneCount} of ${steps.length} steps complete.`} />
       <div className="mb-6 h-2 rounded bg-gray-100">
         <div className="h-2 rounded bg-brand" style={{ width: `${(doneCount / steps.length) * 100}%` }} />
