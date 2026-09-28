@@ -1,4 +1,5 @@
 import { brandForHost } from "@/lib/brand";
+import { PublicShell } from "@/components/public-shell";
 
 export async function generateMetadata() {
   const { brand } = await brandForHost();
@@ -18,7 +19,8 @@ const SUBPROCESSORS = [
 export default async function Trust() {
   const { brand } = await brandForHost();
   return (
-    <main className="mx-auto max-w-4xl px-4 py-10 text-sm leading-relaxed">
+    <PublicShell brand={brand}>
+    <div className="mx-auto max-w-4xl px-4 py-10 text-sm leading-relaxed">
       <h1 className="text-2xl font-semibold">Trust &amp; sub-processors</h1>
       <p className="mt-2 text-muted">How {brand.appName} handles the data our customers collect. Customers are the business (controller); we process on their instructions as a service provider.</p>
 
@@ -57,6 +59,7 @@ export default async function Trust() {
         </table>
       </div>
       <p className="mt-4 text-xs text-muted">We give customers notice before adding a sub-processor. Contact {brand.supportEmail ?? "your account manager"} for our data processing agreement.</p>
-    </main>
+    </div>
+    </PublicShell>
   );
 }

@@ -4,6 +4,7 @@ import { syncLeadToCrm, writeBack } from "./crm";
 import { planAndEnqueue } from "./signals";
 import { deliverPending } from "./delivery";
 import { processInbox } from "./webhooks";
+import { deliverOutbound } from "./outbound";
 
 /** Single source of truth for background work; used inline and by the Inngest functions. */
 export const handlers: { [N in OseEventName]: (data: OseEvents[N]) => Promise<unknown> } = {
@@ -17,4 +18,5 @@ export const handlers: { [N in OseEventName]: (data: OseEvents[N]) => Promise<un
   },
   "ose/signals.deliver": async ({ workspaceId }) => deliverPending(workspaceId),
   "ose/webhook.received": async ({ inboxId }) => processInbox(inboxId),
+  "ose/webhooks.deliver": async ({ workspaceId }) => deliverOutbound(workspaceId),
 };

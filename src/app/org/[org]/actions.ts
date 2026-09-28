@@ -93,3 +93,20 @@ export async function addChildOrg(orgId: string, fd: FormData) {
   await audit({ orgId, actorId: user.id, action: "org.create", entity: "organization", entityId: data!.id, diff: { name, type } });
   redirect(`/org/${data!.id}`);
 }
+
+export async function saveSecurity(orgId: string, fd: FormData) {
+  const user = await requireUser();
+  const { org } = await requireOrg(orgId, 4);
+  const settings = { ...((org as unknown as { settings?: Record<string, unknown> }).settings ?? {}), requireMfaForAdmins: Boolean(fd.get("requireMfaForAdmins")) };
+  if (settings.requireMfaForAdmins) {
+    // Don't lock the current admin out: they must have an authenticator first.
+    const { userClient } = await import("@/lib/supabase/server");
+    const sb = await userClient();
+    const { data } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (data?.currentLevel !== "aal2") back(orgId, "?error=Turn%20on%20two-factor%20for%20your%20own%20account%20first%20(Account%20page)");
+  }
+  await admin().from("organizations").update({ settings }).eq("id", orgId);
+  await audit({ orgId, actorId: user.id, action: "org.security", entity: "organization", entityId: orgId, diff: settings });
+  revalidatePath(`/org/${orgId}`);
+  back(orgId, "?saved=security");
+}

@@ -82,9 +82,23 @@ npm run build       # builds the tag, then Next.js (succeeds with no env vars se
   - data-subject access/export and delete, with a request log
 - **Exports**: leads, signals and spend as CSV. Weekly email summaries go out through Resend under the organization's brand.
 - **Org console**: monthly usage per workspace (the basis for billing), and custom domains added to Netlify automatically when `NETLIFY_AUTH_TOKEN` and `NETLIFY_SITE_ID` are set.
-- **Public trust page** at `/trust`: controls and the sub-processor list, white-labelled.
+- **Public pages:** product homepage `/` (not login-only, as Google verification requires), `/privacy` (includes the Google API Limited Use statement), `/terms` and `/trust`. All are white-labelled. The privacy and terms pages are **drafts for counsel**; set the `LEGAL_*` variables.
+- **Consent-required mode** for EU/UK sites: add `data-consent="required"` to the tag. It stores and sends nothing until the site's consent banner grants `ad_storage`.
+- **Data map export** (Privacy page): a per-workspace inventory for the client's privacy assessment.
+- **GHL app uninstall** stops sync and wipes the stored tokens.
 - **Integrations** (`integrations/`): a Google Tag Manager custom template and a WordPress plugin.
 - **CI** (`.github/workflows/ci.yml`): lint, typecheck, unit tests, SQL/RLS isolation test and build on every push.
+
+## v0.4 additions
+
+- **Demo workspace:** one click from the Workspaces page or the organization page. It generates about 300 leads over 120 days, with stage histories, value-ladder uploads (dry run), spend, alerts, CRM operations and an automation registry. It uses the same engines as live traffic, and can be deleted from its banner.
+- **No-code scoring builder:** questions, options, points, lead-type conditions, test cases, a live "try it" panel, and publishing gated by validation.
+- **Setup checklist** (`/w/…/setup`) and **Reports** (`/w/…/reports`): velocity by lead type, score band vs outcome, and dead spend by lost reason.
+- **Outbound webhooks** (Sites & API): HMAC-signed events with retries and a delivery log. Plus **`GET /v1/reports/funnel`**.
+- **Historical deal import** (CRM stages page): for reporting and calibration only, never uploaded. You can also **load pipelines from GoHighLevel** with suggested mappings.
+- **Two-factor authentication** (Account page) and an organization setting that requires it for admins.
+- **Client health** table on the organization page, **error pages**, and public **developer docs** at `/docs`.
+- Migration `20260930000000_webhooks_and_security.sql` must be run in Supabase.
 
 ## Integrating a client website
 

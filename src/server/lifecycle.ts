@@ -3,6 +3,7 @@ import { admin } from "@/lib/supabase/admin";
 import { isCanonicalStage, laterStage, rungIndex, type CanonicalStage } from "@/core/stages";
 import { dispatch } from "./dispatch";
 import { raiseAlert } from "./alerts";
+import { emitEvent } from "./outbound";
 
 /**
  * Record a canonical stage change for a lead (spec §12 step 4). Append-only; the lead's current stage
@@ -60,6 +61,7 @@ export async function recordStage(args: {
   }
 
   await dispatch("ose/stage.recorded", { workspaceId: args.workspaceId, leadId: args.leadId, stage: args.stage });
+  await emitEvent(args.workspaceId, "lead.stage_changed", { lead_id: args.leadId, stage: args.stage, occurred_at: args.occurredAt ?? new Date().toISOString(), lost_reason: args.lostReason ?? null });
   return { stage: next };
 }
 

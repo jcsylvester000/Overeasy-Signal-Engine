@@ -90,6 +90,18 @@ async function processGhl(p: GhlPayload): Promise<string | null> {
 
 async function handleGhl(workspaceId: string, p: GhlPayload) {
   switch (p.type) {
+    case "AppUninstall":
+    case "UNINSTALL": {
+      // The client removed the app in their CRM: stop syncing and wipe the stored tokens (GHL listing requirement).
+      const db = admin();
+      const { data: conns } = await db.from("connections").select("id").eq("workspace_id", workspaceId).eq("provider", "ghl").eq("external_account", p.locationId ?? "");
+      for (const c of conns ?? []) {
+        await db.rpc("ose_vault_put", { p_name: `conn:${c.id}`, p_secret: "{}" });
+        await db.from("connections").update({ status: "disconnected", token_secret_id: null, error: "App uninstalled in the CRM" }).eq("id", c.id);
+      }
+      await raiseAlert(workspaceId, { type: "connection_expired", severity: "warning", title: "The CRM app was uninstalled; CRM sync is stopped", dedupeKey: `ghl-uninstall:${p.locationId}` });
+      return;
+    }
     case "ContactCreate":
     case "ContactUpdate": {
       const leadId = await findLead(workspaceId, "ghl", { contactId: p.id, email: p.email, phone: p.phone });

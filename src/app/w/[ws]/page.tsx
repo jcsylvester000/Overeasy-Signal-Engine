@@ -28,7 +28,7 @@ function Breakdown({ rows, currency, spend }: { rows: Row[]; currency: string; s
   );
 }
 
-export default async function Overview({ params, searchParams }: { params: Promise<{ ws: string }>; searchParams: Promise<{ days?: string; test?: string; denied?: string }> }) {
+export default async function Overview({ params, searchParams }: { params: Promise<{ ws: string }>; searchParams: Promise<{ days?: string; test?: string; denied?: string; welcome?: string }> }) {
   const { ws: wsId } = await params;
   const sp = await searchParams;
   const { ws } = await requireWorkspace(wsId);
@@ -57,6 +57,13 @@ export default async function Overview({ params, searchParams }: { params: Promi
         }
       />
       {sp.denied && <Notice tone="amber">Your role does not allow that page.</Notice>}
+      {sp.welcome === "demo" && (
+        <div className="mb-4">
+          <Notice tone="green">
+            Demo workspace ready. Tour it: <strong>Leads</strong> (open any lead to see its score, stage history and uploads) → <strong>Ad signals</strong> (every upload and payload) → <strong>Ad spend</strong> → <strong>Bidding readiness</strong> → <strong>Calibration</strong> → the <strong>Configure</strong> pages. Use <strong>Simulator</strong> to push a new lead through live.
+          </Notice>
+        </div>
+      )}
       {includeTest && r.testLeads > 0 && <div className="mb-4"><Notice>Includes {r.testLeads} simulated lead(s).</Notice></div>}
 
       <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-5">

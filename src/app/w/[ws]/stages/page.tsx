@@ -3,6 +3,7 @@ import { userClient } from "@/lib/supabase/server";
 import { CANONICAL_STAGES, STAGE_LABEL } from "@/core/stages";
 import { Button, Card, Field, Notice, PageHeader, Table, Td } from "@/components/ui";
 import { addStageMap, saveStageMaps } from "../actions";
+import { fetchPipelines, uploadHistory } from "../ops-actions";
 
 export const metadata = { title: "CRM stages" };
 
@@ -11,6 +12,7 @@ export default async function Stages({ params, searchParams }: { params: Promise
   const sp = await searchParams;
   const { ws } = await requireWorkspace(wsId, 3);
   const sb = await userClient();
+  const { data: ghlConns } = await sb.from("connections").select("id,display_name").eq("workspace_id", ws.id).eq("provider", "ghl").neq("status", "disconnected");
   const { data: maps } = await sb.from("stage_maps").select("*").eq("workspace_id", ws.id).order("provider").order("pipeline_name").order("stage_name");
   const rules = ((ws.settings as { stageEntryRules?: Record<string, string> }).stageEntryRules ?? {}) as Record<string, string>;
   const options = [...CANONICAL_STAGES, "ignore"] as const;
@@ -57,6 +59,28 @@ export default async function Stages({ params, searchParams }: { params: Promise
           </Table>
           {!!maps?.length && <Button className="mt-3">Save mapping</Button>}
         </form>
+      </Card>
+
+      {!!ghlConns?.length && (
+        <Card title="Load pipelines from the CRM" description="Reads every pipeline and stage from GoHighLevel and suggests a mapping from the stage names. Nothing is saved as live mapping until you review it above." className="mt-6">
+          <div className="flex flex-wrap gap-2">
+            {ghlConns.map((c) => (
+              <form key={c.id} action={fetchPipelines.bind(null, ws.id, c.id)}>
+                <Button variant="secondary">Load from {c.display_name ?? "GoHighLevel"}</Button>
+              </form>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      <Card title="Import historical deals" description="Upload past opportunities (CSV) so reports and calibration have history from day one. Imported leads are never uploaded to ad platforms." className="mt-6">
+        <form action={uploadHistory.bind(null, ws.id)} className="flex flex-wrap items-center gap-3">
+          <input type="file" name="file" accept=".csv,text/csv" required aria-label="History CSV" />
+          <Button variant="secondary">Import</Button>
+        </form>
+        <pre className="mt-3 overflow-x-auto rounded bg-gray-50 p-2 text-xs">{`created_at,stage,stage_date,lead_type,campaign,platform,state,email,phone,funded_value,lost_reason
+2026-03-02,funded,2026-05-20,Title / Probate,Search – Inherited Land,google,TX,a@b.com,,21500,
+2026-03-05,lost,2026-03-20,Fast Cash,Bing – Sell Land,bing,NC,,,,"Price too high"`}</pre>
       </Card>
 
       <Card title="Add a CRM stage manually" className="mt-6">

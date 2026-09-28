@@ -1,5 +1,6 @@
 import "server-only";
 import { admin } from "@/lib/supabase/admin";
+import { emitEvent } from "./outbound";
 
 export type AlertInput = {
   type: string;
@@ -16,6 +17,7 @@ export async function raiseAlert(workspaceId: string, a: AlertInput) {
     .insert({ workspace_id: workspaceId, type: a.type, severity: a.severity, title: a.title, detail: a.detail ?? {}, dedupe_key: a.dedupeKey ?? null });
   if (error && !/duplicate key/i.test(error.message)) console.error("[alert]", error.message);
   if (!error && a.severity !== "info") await notify(workspaceId, a);
+  if (!error) await emitEvent(workspaceId, "alert.raised", { type: a.type, severity: a.severity, title: a.title });
 }
 
 async function notify(workspaceId: string, a: AlertInput) {

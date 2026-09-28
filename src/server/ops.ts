@@ -9,6 +9,7 @@ import { createGoogleConversionActions } from "@/connectors/google/ads";
 import { createMicrosoftGoals } from "@/connectors/microsoft/reporting";
 import type { Connection } from "@/connectors/types";
 import { publishedScoring, publishedValue } from "./models";
+import { ghl, ghlCalls } from "@/connectors/ghl/client";
 
 // ------------------------------------------------------------------ Calibration (VAL-06)
 export async function calibrationFor(workspaceId: string, lookbackDays = 365) {
@@ -175,4 +176,39 @@ export async function dsarDelete(workspaceId: string, identifier: string, actorI
     detail: { retractOnPlatforms: retract, note: "Retract listed transaction IDs via Google conversion adjustments / Microsoft offline conversion adjustments; delete the CRM contact in the client's CRM." },
   });
   return { deleted: ids.length, retract };
+}
+
+// ------------------------------------------------------------------ GHL pipelines → stage map (L-06)
+const GUESS: [RegExp, string][] = [
+  [/fund|closed.?won|paid|closed$/i, "funded"],
+  [/assign|sold|resold/i, "sold"],
+  [/contract|signed|under/i, "contract"],
+  [/offer|opportun|proposal|appoint|quote/i, "opportunity"],
+  [/qualif/i, "qualified"],
+  [/dead|lost|junk|disqual|not.?interested/i, "lost"],
+  [/new|lead|inbound/i, "submitted"],
+];
+
+export function guessCanonical(name: string) {
+  return GUESS.find(([re]) => re.test(name))?.[1] ?? "ignore";
+}
+
+export async function importGhlPipelines(workspaceId: string, connectionId: string) {
+  const db = admin();
+  const { data: conn } = await db.from("connections").select("*").eq("id", connectionId).eq("workspace_id", workspaceId).maybeSingle<Connection>();
+  if (!conn || conn.provider !== "ghl") throw new Error("GoHighLevel connection not found");
+  const mode = effectiveMode(conn.mode);
+  if (mode !== "live") return { mode, added: 0 };
+  const res = await ghl<{ pipelines?: { id: string; name: string; stages?: { id: string; name: string }[] }[] }>(conn, ghlCalls.pipelines(conn.external_account ?? ""), mode);
+  let added = 0;
+  for (const p of res.data?.pipelines ?? []) {
+    for (const s of p.stages ?? []) {
+      const { error } = await db.from("stage_maps").upsert(
+        { workspace_id: workspaceId, provider: "ghl", pipeline_id: p.id, pipeline_name: p.name, stage_id: s.id, stage_name: s.name, canonical_stage: guessCanonical(s.name) },
+        { onConflict: "workspace_id,provider,pipeline_id,stage_id", ignoreDuplicates: true },
+      );
+      if (!error) added++;
+    }
+  }
+  return { mode, added };
 }

@@ -1,11 +1,14 @@
 import Link from "next/link";
 import { admin } from "@/lib/supabase/admin";
 import { brandForOrg, sanitizeBrand } from "@/lib/brand";
-import { requireOrg, requireUser, ROLE_LABEL, ROLES, type Org, type Workspace } from "@/lib/tenancy";
+import { enforceMfa, requireOrg, requireUser, ROLE_LABEL, ROLES, type Org, type Workspace } from "@/lib/tenancy";
 import { TEMPLATES } from "@/core/templates";
 import { TopBar } from "@/components/topbar";
+import { nowMs } from "@/lib/time";
 import { Badge, Button, Card, Field, Notice, PageHeader, Table, Td } from "@/components/ui";
-import { addChildOrg, addWorkspace, invite, removeMember, saveBrand } from "./actions";
+import { addChildOrg, addWorkspace, invite, removeMember, saveBrand, saveSecurity } from "./actions";
+import { createDemo } from "@/app/app/actions";
+import { PendingButton } from "@/components/pending-button";
 
 export const metadata = { title: "Organization" };
 
@@ -13,7 +16,8 @@ export default async function OrgPage({ params, searchParams }: { params: Promis
   const { org: orgId } = await params;
   const sp = await searchParams;
   const user = await requireUser();
-  const { org } = await requireOrg(orgId, 4);
+  const { org, rank } = await requireOrg(orgId, 4);
+  await enforceMfa(orgId, rank, `/org/${orgId}`);
   const db = admin();
   const [{ data: usage }, { data: wss }, { data: members }, { data: children }, brand] = await Promise.all([
     db.from("usage_monthly").select("*").eq("org_id", orgId).order("month", { ascending: false }).limit(60),
@@ -23,6 +27,23 @@ export default async function OrgPage({ params, searchParams }: { params: Promis
     brandForOrg(orgId),
   ]);
   const workspaces = (wss ?? []) as Workspace[];
+  // Partner console (P-03): health across this organization's and its child organizations' client workspaces.
+  const childIds = ((children ?? []) as Org[]).map((c) => c.id);
+  const { data: allWs } = await db.from("workspaces").select("id,name,org_id,settings").in("org_id", [orgId, ...childIds]);
+  const since = new Date(nowMs() - 30 * 86_400_000).toISOString();
+  const health = await Promise.all(
+    (allWs ?? []).map(async (w) => {
+      const [{ count: leads30 }, { count: alertsOpen }, { data: cs }, { data: st }, { count: failed }] = await Promise.all([
+        db.from("leads").select("id", { count: "exact", head: true }).eq("workspace_id", w.id).gte("created_at", since),
+        db.from("alerts").select("id", { count: "exact", head: true }).eq("workspace_id", w.id).neq("status", "resolved"),
+        db.from("connections").select("provider,mode,status").eq("workspace_id", w.id).neq("status", "disconnected"),
+        db.from("sites").select("last_event_at").eq("workspace_id", w.id),
+        db.from("signal_jobs").select("id", { count: "exact", head: true }).eq("workspace_id", w.id).in("status", ["dead", "failed"]).gte("created_at", since),
+      ]);
+      const lastTag = (st ?? []).map((x) => x.last_event_at).filter(Boolean).sort().at(-1) ?? null;
+      return { w, leads30: leads30 ?? 0, alertsOpen: alertsOpen ?? 0, conns: cs ?? [], lastTag, failed: failed ?? 0 };
+    }),
+  );
   const own = sanitizeBrand(org.brand as never);
   const emails = new Map<string, string>();
   for (const m of members ?? []) {
@@ -91,6 +112,39 @@ export default async function OrgPage({ params, searchParams }: { params: Promis
           </form>
         </Card>
 
+        <Card title="Client health" description="Every client workspace under this organization and its client organizations (last 30 days).">
+          <Table head={["Workspace", "Organization", "Leads", "Open alerts", "Failed uploads", "Connections", "Last tag event"]} empty="No workspaces yet.">
+            {health.map((h) => (
+              <tr key={h.w.id}>
+                <Td>
+                  <Link className="text-brand hover:underline" href={`/w/${h.w.id}`}>
+                    {h.w.name}
+                  </Link>
+                  {(h.w.settings as { demo?: boolean })?.demo && (
+                    <span className="ml-1">
+                      <Badge tone="purple">demo</Badge>
+                    </span>
+                  )}
+                </Td>
+                <Td className="text-xs">{h.w.org_id === orgId ? org.name : (((children ?? []) as Org[]).find((c) => c.id === h.w.org_id)?.name ?? "")}</Td>
+                <Td className="num">{h.leads30}</Td>
+                <Td className="num">{h.alertsOpen ? <Badge tone="amber">{h.alertsOpen}</Badge> : 0}</Td>
+                <Td className="num">{h.failed ? <Badge tone="red">{h.failed}</Badge> : 0}</Td>
+                <Td className="text-xs">
+                  {h.conns.map((c) => (
+                    <span key={c.provider} className="mr-1">
+                      <Badge tone={c.status !== "ok" ? "red" : c.mode === "live" ? "green" : "blue"}>
+                        {c.provider.replace("_ads", "")}:{c.mode}
+                      </Badge>
+                    </span>
+                  ))}
+                </Td>
+                <Td className="text-xs">{h.lastTag ? new Date(h.lastTag).toISOString().slice(0, 16).replace("T", " ") : "—"}</Td>
+              </tr>
+            ))}
+          </Table>
+        </Card>
+
         <Card title="Usage by month" description="Real (non-simulated) leads per workspace — the metering basis for billing once pricing is set.">
           <Table head={["Month", "Workspace", "Leads", "Simulated"]} empty="No leads yet.">
             {(usage ?? []).map((u) => (
@@ -147,6 +201,22 @@ export default async function OrgPage({ params, searchParams }: { params: Promis
             <div className="flex items-end">
               <Button>Send invite</Button>
             </div>
+          </form>
+        </Card>
+
+        <Card title="Security">
+          <form action={saveSecurity.bind(null, orgId)} className="flex flex-wrap items-center gap-3 text-sm">
+            <label className="flex items-center gap-2">
+              <input type="checkbox" name="requireMfaForAdmins" defaultChecked={Boolean((org as unknown as { settings?: { requireMfaForAdmins?: boolean } }).settings?.requireMfaForAdmins)} />
+              Require two-factor authentication for owners and admins (this organization and its client organizations)
+            </label>
+            <Button variant="secondary">Save</Button>
+          </form>
+        </Card>
+
+        <Card title="Demo" description="A sample client workspace with 120 days of realistic data (dry-run uploads), for demos and training.">
+          <form action={createDemo.bind(null, orgId)}>
+            <PendingButton pendingText="Building demo data… (about 10–20 seconds)">Create demo workspace</PendingButton>
           </form>
         </Card>
 

@@ -11,6 +11,10 @@ import { calibrationFor, createConversionActions, dsarDelete, dsarExport } from 
 import { importSpendCsv, syncSpend } from "@/server/spend";
 import { weeklyReports } from "@/server/notify";
 import { publishedScoring } from "@/server/models";
+import { encrypt, randomToken } from "@/lib/crypto";
+import { deliverOutbound, emitEvent, OUTBOUND_EVENTS } from "@/server/outbound";
+import { importHistory } from "@/server/backfill";
+import { importGhlPipelines } from "@/server/ops";
 
 async function ctx(wsId: string, minRank: number) {
   const user = await requireUser();
@@ -125,4 +129,68 @@ export async function sendTestReport(wsId: string) {
   const { ws } = await ctx(wsId, 4);
   const [r] = await weeklyReports(ws.id);
   go(wsId, "/settings", r ? (r.sent ? { saved: "Weekly summary sent." } : { error: `Not sent: ${r.reason}` }) : { error: "Add report recipients first." });
+}
+
+// ---------------------------------------------------------------- Outbound webhooks
+export type WebhookState = { secret?: string; error?: string } | null;
+
+export async function addWebhook(wsId: string, _prev: WebhookState, fd: FormData): Promise<WebhookState> {
+  const { user, ws, db } = await ctx(wsId, 4);
+  const url = String(fd.get("url") ?? "").trim();
+  if (!/^https:\/\/[^\s]+$/.test(url)) return { error: "Enter an https:// URL." };
+  try {
+    const host = new URL(url).hostname;
+    if (/^(localhost|127\.|10\.|192\.168\.|169\.254\.|0\.)/.test(host) || host.endsWith(".internal")) return { error: "Private or local addresses are not allowed." };
+  } catch {
+    return { error: "Invalid URL." };
+  }
+  const events = OUTBOUND_EVENTS.filter((e) => fd.get(`ev:${e}`));
+  if (!events.length) return { error: "Choose at least one event." };
+  const secret = `whsec_${randomToken(32)}`;
+  const { error } = await db.from("outbound_webhooks").insert({ workspace_id: ws.id, url, secret_enc: encrypt(secret), events });
+  if (error) return { error: error.message };
+  await audit({ orgId: ws.org_id, workspaceId: ws.id, actorId: user.id, action: "webhook.add", entity: "outbound_webhook", diff: { url, events } });
+  revalidatePath(`/w/${wsId}/sites`);
+  return { secret };
+}
+
+export async function removeWebhook(wsId: string, id: string) {
+  const { user, ws, db } = await ctx(wsId, 4);
+  await db.from("outbound_webhooks").delete().eq("id", id).eq("workspace_id", ws.id);
+  await audit({ orgId: ws.org_id, workspaceId: ws.id, actorId: user.id, action: "webhook.remove", entity: "outbound_webhook", entityId: id });
+  revalidatePath(`/w/${wsId}/sites`);
+}
+
+export async function testWebhook(wsId: string) {
+  const { ws } = await ctx(wsId, 4);
+  await emitEvent(ws.id, "alert.raised", { type: "test", severity: "info", title: "Test event from the dashboard" });
+  await deliverOutbound(ws.id);
+  revalidatePath(`/w/${wsId}/sites`);
+}
+
+// ---------------------------------------------------------------- History import + CRM pipelines
+export async function uploadHistory(wsId: string, fd: FormData) {
+  const { user, ws } = await ctx(wsId, 3);
+  const file = fd.get("file");
+  if (!(file instanceof File) || file.size === 0) go(wsId, "/stages", { error: "Choose a CSV file." });
+  let r = { imported: 0, skipped: 0 };
+  try {
+    r = await importHistory(ws.id, await (file as File).text());
+  } catch (e) {
+    go(wsId, "/stages", { error: e instanceof Error ? e.message : "Import failed" });
+  }
+  await audit({ orgId: ws.org_id, workspaceId: ws.id, actorId: user.id, action: "history.import", entity: "leads", diff: r });
+  go(wsId, "/stages", { saved: `Imported ${r.imported} historical lead(s) for reporting and calibration${r.skipped ? `; skipped ${r.skipped}` : ""}. Nothing was uploaded to ad platforms.` });
+}
+
+export async function fetchPipelines(wsId: string, connId: string) {
+  const { ws } = await ctx(wsId, 3);
+  let msg = "";
+  try {
+    const r = await importGhlPipelines(ws.id, connId);
+    msg = r.mode === "live" ? `Loaded ${r.added} CRM stage(s) with suggested mappings. Review and save.` : "The CRM connection is in dry run: connect it and set it to live to load pipelines.";
+  } catch (e) {
+    go(wsId, "/stages", { error: e instanceof Error ? e.message : "Could not load pipelines" });
+  }
+  go(wsId, "/stages", { saved: msg });
 }

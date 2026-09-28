@@ -5,6 +5,8 @@ import { userClient } from "@/lib/supabase/server";
 import { SecretForm } from "@/components/secret-form";
 import { Badge, Button, Card, Field, Notice, PageHeader, Table, Td, when } from "@/components/ui";
 import { addSite, createApiKey, revokeApiKey, rotateWebhookSecret, updateOrigins } from "../actions";
+import { addWebhook, removeWebhook, testWebhook } from "../ops-actions";
+import { OUTBOUND_EVENTS } from "@/server/outbound";
 
 export const metadata = { title: "Sites & API" };
 
@@ -23,6 +25,13 @@ export default async function Sites({ params, searchParams }: { params: Promise<
     sb.from("sites").select("*").eq("workspace_id", ws.id).order("created_at"),
     rank >= 4 ? sb.from("api_keys").select("*").eq("workspace_id", ws.id).order("created_at", { ascending: false }) : Promise.resolve({ data: [] as never[] }),
   ]);
+  const [{ data: hooks }, { data: deliveries }] =
+    rank >= 4
+      ? await Promise.all([
+          sb.from("outbound_webhooks").select("id,url,events,last_status,last_at,failures").eq("workspace_id", ws.id).order("created_at"),
+          sb.from("outbound_deliveries").select("id,event,status,response_code,error,attempts,created_at").eq("workspace_id", ws.id).order("created_at", { ascending: false }).limit(15),
+        ])
+      : [{ data: [] as never[] }, { data: [] as never[] }];
   const selected = sites?.find((s) => s.id === sp.site) ?? sites?.[0];
   const { data: recentVisits } = selected ? await sb.from("visits").select("created_at,touch,gclid,gbraid,wbraid,msclkid,utm_source,utm_campaign,landing_url").eq("site_id", selected.id).order("created_at", { ascending: false }).limit(25) : { data: [] };
   const { data: recentLeads } = selected ? await sb.from("leads").select("id,created_at,form,score,lead_type,source").eq("site_id", selected.id).order("created_at", { ascending: false }).limit(25) : { data: [] };
@@ -48,6 +57,9 @@ export default async function Sites({ params, searchParams }: { params: Promise<
             >
               <div className="text-xs font-medium">1. Paste before &lt;/head&gt; (or use Google Tag Manager → Custom HTML)</div>
               <pre className="mt-1 overflow-x-auto rounded bg-gray-900 p-3 text-xs text-gray-100">{`<script async src="${tagOrigin}/ose.js" data-site="${s.site_key}"></script>`}</pre>
+              <p className="mt-1 text-xs text-muted">
+                EU/UK/Swiss visitors: add <code>data-consent=&quot;required&quot;</code> to the script tag. The tag then stores and sends nothing until the site&apos;s consent banner grants <code>ad_storage</code> (Google Consent Mode), or you call <code>ose.consent(&#123; ad_storage: &quot;granted&quot; &#125;)</code>.
+              </p>
               <div className="mt-3 text-xs font-medium">2. Optional: name forms and fields explicitly, or send a lead from JavaScript</div>
               <pre className="mt-1 overflow-x-auto rounded bg-gray-50 p-3 text-xs">{`<form data-ose-form="quote"> <input name="email" data-ose-field="email"> … </form>
 <form data-ose-ignore> … never tracked … </form>
@@ -170,6 +182,60 @@ X-OSE-Signature: t=<unix>,v1=<hex HMAC-SHA256(secret, t + "." + body)>
               <div className="mt-3">
                 <SecretForm action={rotateWebhookSecret.bind(null, ws.id)} button="Generate new secret" note="Copy this secret now. The previous one stops working immediately." />
               </div>
+            </Card>
+
+            <Card title="Outbound webhooks" description="We POST signed events to your endpoints (see Developer docs → Outbound webhooks). Failed deliveries retry up to 6 times.">
+              <Table head={["Endpoint", "Events", "Last response", "Failures", ""]} empty="No endpoints yet.">
+                {(hooks ?? []).map((w) => (
+                  <tr key={w.id}>
+                    <Td mono>{w.url}</Td>
+                    <Td className="text-xs">{(w.events as string[]).join(", ")}</Td>
+                    <Td>{w.last_status ? `${w.last_status} · ${when(w.last_at)}` : "—"}</Td>
+                    <Td className="num">{w.failures}</Td>
+                    <Td>
+                      <form action={removeWebhook.bind(null, ws.id, w.id)}>
+                        <button className="text-xs text-red-700 hover:underline">Remove</button>
+                      </form>
+                    </Td>
+                  </tr>
+                ))}
+              </Table>
+              <div className="mt-4 border-t border-line pt-4">
+                <SecretForm action={addWebhook.bind(null, ws.id)} button="Add endpoint" note="Signing secret — copy it now; it will not be shown again.">
+                  <Field label="Endpoint URL (https)">
+                    <input name="url" type="url" required placeholder="https://example.com/hooks/signal-engine" className="w-full max-w-lg" />
+                  </Field>
+                  <fieldset className="flex flex-wrap gap-3 text-sm">
+                    <legend className="mb-1 text-xs font-medium">Events</legend>
+                    {OUTBOUND_EVENTS.map((e) => (
+                      <label key={e} className="flex items-center gap-1">
+                        <input type="checkbox" name={`ev:${e}`} defaultChecked /> {e}
+                      </label>
+                    ))}
+                  </fieldset>
+                </SecretForm>
+              </div>
+              {!!hooks?.length && (
+                <form action={testWebhook.bind(null, ws.id)} className="mt-3">
+                  <Button variant="secondary">Send a test event</Button>
+                </form>
+              )}
+              {!!deliveries?.length && (
+                <div className="mt-4">
+                  <div className="mb-1 text-xs font-medium">Recent deliveries</div>
+                  <Table head={["When", "Event", "Status", "Code", "Attempts"]}>
+                    {(deliveries ?? []).map((d) => (
+                      <tr key={d.id}>
+                        <Td>{when(d.created_at)}</Td>
+                        <Td>{d.event}</Td>
+                        <Td>{d.status}</Td>
+                        <Td>{d.response_code ?? d.error ?? "—"}</Td>
+                        <Td className="num">{d.attempts}</Td>
+                      </tr>
+                    ))}
+                  </Table>
+                </div>
+              )}
             </Card>
           </>
         )}

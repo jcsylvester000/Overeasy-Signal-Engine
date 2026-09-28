@@ -7,6 +7,7 @@ import { markConnection } from "@/connectors/tokens";
 import { ConnectorError, type Connection, type OutboundConversion, type SendResult } from "@/connectors/types";
 import { uploadPolicy, type LeadConsent, type PrivacySettings } from "@/core/privacy";
 import { raiseAlert } from "./alerts";
+import { emitEvent } from "./outbound";
 import { writeBack } from "./crm";
 
 const MAX_ATTEMPTS = 8;
@@ -145,6 +146,7 @@ async function deliverGroup(connectionId: string, stage: string, jobs: Job[]) {
     const r = result.results[j.id];
     if (r?.ok) {
       await db.from("signal_jobs").update({ status: okStatus, attempts: j.attempts + 1, sent_at: now, request: result.request, response: result.response, error: null }).eq("id", j.id);
+      await emitEvent(j.workspace_id, "signal.sent", { lead_id: j.lead_id, platform: j.platform, stage: j.canonical_stage, value_increment: Number(j.value_increment), mode: j.mode, sent_at: now });
     } else {
       await retryOrFail([j], r?.error ?? "Unknown error", r?.retryable ?? true, result);
     }
@@ -168,6 +170,7 @@ async function retryOrFail(jobs: Job[], error: string, retryable: boolean, resul
       })
       .eq("id", j.id);
     if (dead) {
+      await emitEvent(j.workspace_id, "signal.failed", { lead_id: j.lead_id, platform: j.platform, stage: j.canonical_stage, error: error.slice(0, 300) });
       await raiseAlert(j.workspace_id, {
         type: "sync_failure",
         severity: "critical",

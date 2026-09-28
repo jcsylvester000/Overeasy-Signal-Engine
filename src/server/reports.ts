@@ -114,3 +114,92 @@ export async function overview(workspaceId: string, days: number, includeTest: b
     signals: [...signalStatus.entries()].map(([status, v]) => ({ status, ...v })),
   };
 }
+
+function pct(xs: number[], p: number) {
+  if (!xs.length) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  return s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))];
+}
+
+/** RPT-04 velocity, S-10 score analytics, RPT-05 dead spend by lost reason. */
+export async function deepReports(workspaceId: string, days: number, includeTest: boolean) {
+  const sb = await userClient();
+  const from = new Date(Date.now() - days * 86_400_000).toISOString();
+  let q = sb.from("leads").select("id,created_at,click_ts,score,score_capped,lead_type,canonical_stage,lost_reason,attribution").eq("workspace_id", workspaceId).gte("created_at", from).limit(10000);
+  if (!includeTest) q = q.eq("is_test", false);
+  const { data } = await q;
+  const leads = data ?? [];
+  const ids = leads.map((l) => l.id as string);
+  const firstAt = new Map<string, Record<string, number>>();
+  for (let i = 0; i < ids.length; i += 500) {
+    const { data: ev } = await sb.from("stage_events").select("lead_id,canonical_stage,occurred_at").in("lead_id", ids.slice(i, i + 500));
+    for (const e of ev ?? []) {
+      const m = firstAt.get(e.lead_id) ?? {};
+      const t = Date.parse(e.occurred_at);
+      if (!(e.canonical_stage in m) || m[e.canonical_stage] > t) m[e.canonical_stage] = t;
+      firstAt.set(e.lead_id, m);
+    }
+  }
+  const types = [...new Set(leads.map((l) => l.lead_type ?? "(unscored)"))];
+  const stages = ["qualified", "opportunity", "contract", "funded"] as const;
+  const velocity = types.map((t) => {
+    const ls = leads.filter((l) => (l.lead_type ?? "(unscored)") === t);
+    const row: Record<string, { median: number | null; p75: number | null; n: number }> = {};
+    for (const s of stages) {
+      const d = ls
+        .map((l) => {
+          const at = firstAt.get(l.id)?.[s];
+          const start = Date.parse(l.click_ts ?? l.created_at);
+          return at ? (at - start) / 86_400_000 : null;
+        })
+        .filter((x): x is number => x !== null && x >= 0);
+      row[s] = { median: pct(d, 50), p75: pct(d, 75), n: d.length };
+    }
+    return { type: t, leads: ls.length, qualified: row.qualified, opportunity: row.opportunity, contract: row.contract, funded: row.funded };
+  });
+
+  const bands = [
+    { label: "≤ 25", min: -Infinity, max: 25 },
+    { label: "26–50", min: 25, max: 50 },
+    { label: "51–75", min: 50, max: 75 },
+    { label: "76–100", min: 75, max: 100 },
+    { label: "> 100", min: 100, max: Infinity },
+  ];
+  const reachedIdx = (id: string) => Math.max(-1, ...Object.keys(firstAt.get(id) ?? {}).map((s) => rungIndex(s)));
+  const scoreBands = bands.map((b) => {
+    const ls = leads.filter((l) => l.score !== null && Number(l.score) > b.min && Number(l.score) <= b.max);
+    const n = ls.length;
+    return {
+      band: b.label,
+      leads: n,
+      qualifiedRate: n ? ls.filter((l) => reachedIdx(l.id) >= 1).length / n : null,
+      contractRate: n ? ls.filter((l) => reachedIdx(l.id) >= 3).length / n : null,
+      fundedRate: n ? ls.filter((l) => reachedIdx(l.id) >= 5).length / n : null,
+    };
+  });
+  const capHits = leads.filter((l) => l.score_capped).length;
+
+  const { data: spendRows } = await sb.from("ad_spend_daily").select("campaign,campaign_id,cost").eq("workspace_id", workspaceId).gte("date", from.slice(0, 10));
+  const spendBy = new Map<string, number>();
+  for (const r of spendRows ?? []) spendBy.set(r.campaign ?? r.campaign_id, (spendBy.get(r.campaign ?? r.campaign_id) ?? 0) + Number(r.cost));
+  const deadByReason = new Map<string, { leads: number; spend: number }>();
+  for (const [camp, spend] of spendBy) {
+    const cl = leads.filter((l) => ((l.attribution ?? {}) as Record<string, string>).utm_campaign === camp);
+    if (!cl.length) continue;
+    const perLead = spend / cl.length;
+    for (const l of cl.filter((x) => x.canonical_stage === "lost")) {
+      const k = l.lost_reason ?? "unspecified";
+      const cur = deadByReason.get(k) ?? { leads: 0, spend: 0 };
+      cur.leads++;
+      cur.spend += perLead;
+      deadByReason.set(k, cur);
+    }
+  }
+  return {
+    velocity,
+    scoreBands,
+    capHitRate: leads.length ? capHits / leads.length : 0,
+    deadByReason: [...deadByReason.entries()].map(([reason, v]) => ({ reason, ...v })).sort((a, b) => b.spend - a.spend),
+    total: leads.length,
+  };
+}

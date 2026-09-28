@@ -5,6 +5,7 @@ import { userClient } from "@/lib/supabase/server";
 import { requireUser } from "@/lib/tenancy";
 import { TopBar } from "@/components/topbar";
 import { Button, Card, Field, Notice, PageHeader } from "@/components/ui";
+import { MfaManager } from "@/components/mfa";
 
 export const metadata = { title: "Account" };
 
@@ -20,7 +21,7 @@ async function setPassword(fd: FormData) {
   redirect("/app/account?ok=1");
 }
 
-export default async function Account({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
+export default async function Account({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string; mfa?: string }> }) {
   const sp = await searchParams;
   const user = await requireUser();
   const { brand } = await brandForHost();
@@ -29,6 +30,14 @@ export default async function Account({ searchParams }: { searchParams: Promise<
       <TopBar brand={brand} email={user.email} />
       <main className="mx-auto max-w-lg px-4 py-8">
         <PageHeader title="Account" description={user.email ?? ""} />
+        {sp.mfa === "required" && (
+          <div className="mb-4">
+            <Notice tone="amber">Your organization requires two-factor authentication for admins. Turn it on below to continue.</Notice>
+          </div>
+        )}
+        <Card title="Two-factor authentication" description="Protects admin access with a code from an authenticator app." className="mb-6">
+          <MfaManager />
+        </Card>
         <Card title="Set a password" description="Invited users sign in with the email link first, then set a password here.">
           {sp.ok && <Notice tone="green">Password updated.</Notice>}
           {sp.error && <Notice tone="red">{sp.error}</Notice>}

@@ -13,13 +13,13 @@ declare global {
   interface Window {
     ose?: OseApi & { q?: unknown[][] };
     dataLayer?: unknown[];
-    oseConfig?: { site?: string };
+    oseConfig?: { site?: string; consentRequired?: boolean };
   }
 }
 type OseApi = {
   lead: (d: { form?: string; email?: string; phone?: string; name?: string; geo?: string; answers?: Record<string, string | number>; test?: boolean }) => Promise<unknown>;
   identify: (d: { email?: string; phone?: string }) => void;
-  consent: (c: { ad_user_data?: "granted" | "denied"; ad_personalization?: "granted" | "denied" }) => void;
+  consent: (c: { ad_user_data?: "granted" | "denied"; ad_personalization?: "granted" | "denied"; ad_storage?: "granted" | "denied" }) => void;
   debug: () => { store: Store; events: unknown[] };
   version: string;
 };
@@ -34,6 +34,9 @@ type OseApi = {
   const SITE = script.getAttribute("data-site") || window.oseConfig?.site || new URL(script.src).searchParams.get("site") || "";
   if (!SITE) return;
   const ENDPOINT = new URL("/v1/collect", script.src).toString();
+  // Consent-required mode (EU/UK/CH sites): store and send nothing until the CMP grants ad_storage.
+  const CONSENT_REQUIRED = script.getAttribute("data-consent") === "required" || window.oseConfig?.consentRequired === true;
+  let visitSent = false;
   const KEY = "_ose";
   const CLICK = ["gclid", "gbraid", "wbraid", "msclkid", "fbclid"];
   const PARAMS = [...CLICK, "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "campaignid", "adgroupid", "keyword", "device"];
@@ -55,6 +58,7 @@ type OseApi = {
     return { v: rid() };
   }
   function write(s: Store) {
+    if (!granted()) return;
     const val = JSON.stringify(s);
     try {
       localStorage.setItem(KEY, val);
@@ -81,9 +85,24 @@ type OseApi = {
         const c = arr[2] as Dict;
         if (c.ad_user_data) out.ad_user_data = c.ad_user_data;
         if (c.ad_personalization) out.ad_personalization = c.ad_personalization;
+        if (c.ad_storage) out.ad_storage = c.ad_storage;
       }
     }
     return out;
+  }
+
+  function granted(): boolean {
+    return !CONSENT_REQUIRED || consentFromDataLayer().ad_storage === "granted";
+  }
+
+  /** Called when consent may have changed: persist the pending touch and send the deferred visit. */
+  function flush() {
+    if (!granted()) return;
+    write(store);
+    if (store.last && !visitSent) {
+      visitSent = true;
+      send({ t: "visit", a: store.last });
+    }
   }
 
   function send(payload: Dict | Record<string, unknown>, wantResponse = false): Promise<unknown> {
@@ -112,11 +131,12 @@ type OseApi = {
     if (document.referrer) t.referrer = document.referrer.split("?")[0];
     if (!store.first) store.first = t; // first touch is never overwritten
     store.last = t;
-    write(store);
-    send({ t: "visit", a: t });
+    visitSent = false;
+    flush();
   }
 
   function attribution(): Dict {
+    if (!granted()) return {};
     return { ...(store.first || {}), ...(store.last || {}) };
   }
 
@@ -128,6 +148,7 @@ type OseApi = {
     return el.type === "password" || el.type === "hidden" && key.startsWith("ose_") || SENSITIVE.test(key) || SENSITIVE.test(el.autocomplete || "");
   }
   function injectHidden(form: HTMLFormElement) {
+    if (!granted()) return;
     const a = attribution();
     const set = (n: string, v?: string) => {
       if (!v) return;
@@ -209,7 +230,7 @@ type OseApi = {
     },
     consent: (c) => {
       store.c = { ...(store.c || {}), ...c } as Dict;
-      write(store);
+      flush();
     },
     debug: () => ({ store, events }),
   };
@@ -219,6 +240,16 @@ type OseApi = {
   capture();
   bind();
   watchHistory();
+  if (CONSENT_REQUIRED && !granted()) {
+    // Watch the CMP's Consent Mode updates for up to 10 minutes.
+    let n = 0;
+    const t = setInterval(() => {
+      if (granted() || ++n > 600) {
+        clearInterval(t);
+        flush();
+      }
+    }, 1000);
+  }
   for (const [m, ...args] of queued) (api as unknown as Record<string, (...a: unknown[]) => unknown>)[m as string]?.(...args);
 })();
 

@@ -16,7 +16,15 @@ export default async function Privacy({ params, searchParams }: { params: Promis
 
   return (
     <>
-      <PageHeader title="Privacy" description="Upload policy for opt-outs and regulated verticals, and data-subject requests (access / delete). Not legal advice — confirm settings with counsel." />
+      <PageHeader
+        title="Privacy"
+        description="Upload policy for opt-outs and regulated verticals, and data-subject requests (access / delete). Not legal advice — confirm settings with counsel."
+        actions={
+          <a className="rounded-md border border-line bg-white px-3 py-1.5 text-sm hover:bg-gray-50" href={`/w/${ws.id}/export/data-map.md`}>
+            Download data map
+          </a>
+        }
+      />
       {sp.saved && <div className="mb-4"><Notice tone="green">{sp.saved}</Notice></div>}
 
       <Card title="Upload policy" className="mb-6">

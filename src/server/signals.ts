@@ -23,6 +23,7 @@ type LeadRow = {
   click_ts: string | null;
   currency: string;
   consent: LeadConsent | null;
+  source: string;
 };
 
 /**
@@ -33,6 +34,7 @@ export async function planAndEnqueue(workspaceId: string, leadId: string): Promi
   const db = admin();
   const { data: lead } = await db.from("leads").select("*").eq("id", leadId).eq("workspace_id", workspaceId).maybeSingle<LeadRow>();
   if (!lead) return [];
+  if (lead.source === "import") return []; // historical imports feed reporting and calibration only, never uploads
 
   const { data: events } = await db.from("stage_events").select("canonical_stage,actual_value").eq("lead_id", leadId).order("occurred_at");
   let reached: Rung = "submitted";

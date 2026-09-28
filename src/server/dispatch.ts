@@ -7,6 +7,7 @@ export type OseEvents = {
   "ose/stage.recorded": { workspaceId: string; leadId: string; stage: string };
   "ose/signals.deliver": { workspaceId?: string };
   "ose/webhook.received": { inboxId: string };
+  "ose/webhooks.deliver": { workspaceId?: string };
 };
 export type OseEventName = keyof OseEvents;
 

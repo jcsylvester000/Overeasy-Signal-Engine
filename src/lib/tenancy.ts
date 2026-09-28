@@ -68,3 +68,26 @@ export async function requireOrg(orgId: string, minRank = 4) {
   if (a.rank < minRank) notFound();
   return a;
 }
+
+/**
+ * MFA policy: when an organization (or any ancestor) requires it, admins and owners must be at AAL2.
+ * Users without an authenticator are sent to set one up; users with one are sent to the code check.
+ */
+export async function enforceMfa(orgId: string, rank: number, next: string) {
+  if (rank < 4) return;
+  const { admin } = await import("@/lib/supabase/admin");
+  const db = admin();
+  let id: string | null = orgId;
+  let required = false;
+  for (let i = 0; id && i < 5 && !required; i++) {
+    const res: { data: { parent_id: string | null; settings: { requireMfaForAdmins?: boolean } | null } | null } = await db.from("organizations").select("parent_id,settings").eq("id", id).maybeSingle();
+    required = Boolean(res.data?.settings?.requireMfaForAdmins);
+    id = res.data?.parent_id ?? null;
+  }
+  if (!required) return;
+  const sb = await userClient();
+  const { data } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (data?.currentLevel === "aal2") return;
+  if (data?.nextLevel === "aal2") redirect(`/login/mfa?next=${encodeURIComponent(next)}`);
+  redirect("/app/account?mfa=required");
+}

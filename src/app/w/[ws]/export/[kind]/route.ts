@@ -36,6 +36,48 @@ export async function GET(req: Request, ctx: { params: Promise<{ ws: string; kin
   } else if (kind === "spend.csv") {
     const { data } = await sb.from("ad_spend_daily").select("date,platform,campaign,campaign_id,adgroup_id,geo,cost,clicks,impressions").eq("workspace_id", ws.id).gte("date", since.slice(0, 10)).order("date", { ascending: false }).limit(50000);
     csv = toCsv(["date", "platform", "campaign", "campaign_id", "adgroup_id", "geo", "cost", "clicks", "impressions"], (data ?? []).map((r) => [r.date, r.platform, r.campaign, r.campaign_id, r.adgroup_id, r.geo, r.cost, r.clicks, r.impressions]));
+  } else if (kind === "data-map.md") {
+    // B15: data inventory / data-flow summary for the client's privacy assessment (DPIA/PIA).
+    const [{ data: model }, { data: conns }, { data: sites }] = await Promise.all([
+      sb.from("scoring_models").select("model,version").eq("workspace_id", ws.id).eq("status", "published").maybeSingle(),
+      sb.from("connections").select("provider,mode,status").eq("workspace_id", ws.id).neq("status", "disconnected"),
+      sb.from("sites").select("domain,allowed_origins").eq("workspace_id", ws.id),
+    ]);
+    const st = ws.settings as { storeRawPii?: boolean; piiRetentionDays?: number; regulatedVertical?: boolean; optOutPolicy?: string };
+    const fields = ((model?.model as { fields?: { key: string; label: string; sensitive?: boolean }[] })?.fields ?? []).map((f) => `| ${f.label} | \`${f.key}\` | ${f.sensitive ? "Sensitive: used for scoring, stored masked" : "Stored with the lead"} |`);
+    csv = [
+      `# Data map — ${ws.name}`,
+      `Generated ${new Date().toISOString().slice(0, 10)}. For the client's privacy assessment; not legal advice.`,
+      ``,
+      `## Collection points`,
+      ...(sites ?? []).map((s) => `- Website tag on ${s.domain} (allowed origins: ${(s.allowed_origins ?? []).join(", ") || "any"})`),
+      `- Server Ingest API and CRM webhooks (if configured)`,
+      ``,
+      `## Data captured`,
+      `| Item | Detail | Handling |`,
+      `|---|---|---|`,
+      `| Ad click data | gclid, gbraid, wbraid, msclkid, fbclid, UTM/ValueTrack, landing page (no query), referrer, click time | Stored per visit and bound to the lead |`,
+      `| Consent | Google Consent Mode (ad_user_data, ad_personalization, ad_storage), Global Privacy Control | Stored per lead; enforced before upload |`,
+      `| Email / phone | Normalised, SHA-256 hashed at intake | Hashes kept for matching${st.regulatedVertical ? "; never uploaded (regulated vertical)" : " and uploads where permitted"} |`,
+      `| Raw email / phone / name | ${st.storeRawPii === false ? "Not stored" : `Encrypted (AES-256-GCM), deleted after ${st.piiRetentionDays ?? 30} days`} | Used only for CRM sync |`,
+      `| Pipeline stages, deal value | From the CRM | Stored as stage history |`,
+      ``,
+      `## Form fields (scoring model v${model?.version ?? "—"}; unlisted fields are dropped)`,
+      `| Question | Key | Handling |`,
+      `|---|---|---|`,
+      ...fields,
+      ``,
+      `## Recipients`,
+      ...(conns ?? []).map((c) => `- ${c.provider} (${c.mode})`),
+      `- Sub-processors: see /trust`,
+      ``,
+      `## Opt-outs`,
+      `- GPC / recorded opt-out: ${st.optOutPolicy === "click_id_only" ? "uploaded with click ID only, personalization denied" : "not uploaded to ad platforms"}`,
+      `- Data-subject requests: Privacy page (access/export, delete)`,
+      ``,
+    ].join("\n");
+    await audit({ orgId: ws.org_id, workspaceId: ws.id, action: "export.data_map", entity: kind });
+    return new Response(csv, { headers: { "content-type": "text/markdown; charset=utf-8", "content-disposition": `attachment; filename="${ws.slug}-data-map.md"`, "cache-control": "no-store" } });
   } else {
     return new Response("Not found", { status: 404 });
   }

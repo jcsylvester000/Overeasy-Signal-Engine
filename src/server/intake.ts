@@ -8,6 +8,7 @@ import { evaluate } from "@/core/scoring/evaluate";
 import { windowExpiresOn } from "@/core/value/engine";
 import { publishedScoring, publishedValue } from "./models";
 import { dispatch } from "./dispatch";
+import { emitEvent } from "./outbound";
 
 /** Attribution captured by the tag or sent explicitly by a server. */
 export const Attribution = z
@@ -182,6 +183,7 @@ export async function intakeLead(input: IntakeBody & { workspaceId: string; site
 
   await db.from("stage_events").insert({ workspace_id: input.workspaceId, lead_id: lead.id, canonical_stage: "submitted", source: "intake" });
   await dispatch("ose/lead.created", { workspaceId: input.workspaceId, leadId: lead.id });
+  await emitEvent(input.workspaceId, "lead.created", { lead_id: lead.id, created_at: new Date().toISOString(), score: result?.score ?? null, lead_type: result?.leadType ?? null, source: input.source, form: input.form ?? null });
 
   return { lead_id: lead.id as string, score: result?.score ?? null, lead_type: result?.leadType ?? null, score_version: scoring?.version ?? null, duplicate: false };
 }
