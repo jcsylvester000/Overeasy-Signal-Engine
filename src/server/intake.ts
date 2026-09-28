@@ -65,7 +65,7 @@ const CLICK_KEYS = ["gclid", "gbraid", "wbraid", "msclkid", "fbclid"] as const;
  * Lead intake pipeline (spec §12 step 2): resolve attribution → hash PII → score → type → store → emit.
  * Attribution is bound server-side from recorded visits; browser-sent values only fill gaps (ITP-safe).
  */
-export async function intakeLead(input: IntakeBody & { workspaceId: string; siteId?: string | null; source: "tag" | "api" | "simulator" | "crm" | "import"; idempotencyKey?: string | null }) {
+export async function intakeLead(input: IntakeBody & { workspaceId: string; siteId?: string | null; source: "tag" | "api" | "simulator" | "crm" | "import"; idempotencyKey?: string | null; via?: string | null }) {
   const db = admin();
 
   if (input.idempotencyKey) {
@@ -162,6 +162,7 @@ export async function intakeLead(input: IntakeBody & { workspaceId: string; site
         consent,
         is_test: Boolean(input.test) || input.source === "simulator",
         idempotency_key: input.idempotencyKey ?? null,
+        capture_via: input.via ?? null,
       })
       .select("id")
       .single(),
@@ -186,4 +187,61 @@ export async function intakeLead(input: IntakeBody & { workspaceId: string; site
   await emitEvent(input.workspaceId, "lead.created", { lead_id: lead.id, created_at: new Date().toISOString(), score: result?.score ?? null, lead_type: result?.leadType ?? null, source: input.source, form: input.form ?? null });
 
   return { lead_id: lead.id as string, score: result?.score ?? null, lead_type: result?.leadType ?? null, score_version: scoring?.version ?? null, duplicate: false };
+}
+
+/**
+ * Embedded third-party forms (Typeform, GHL iframe, Calendly…) reach us as a contact-less "embed" lead from the tag,
+ * and later as a CRM event with the contact. Returns that anonymous lead so the CRM event merges into it instead of
+ * creating a duplicate. Exact match on the visitor id (passed into the embed via data-embed-params → ose_visitor);
+ * otherwise only when exactly one unmatched embed lead arrived in the last 15 minutes.
+ */
+export async function findAnonymousEmbedLead(workspaceId: string, visitorId?: string | null): Promise<string | null> {
+  const db = admin();
+  if (visitorId) {
+    const { data } = await db
+      .from("leads")
+      .select("id")
+      .eq("workspace_id", workspaceId)
+      .eq("visitor_id", visitorId)
+      .is("email_sha256", null)
+      .is("phone_sha256", null)
+      .gte("created_at", new Date(Date.now() - 7 * 86_400_000).toISOString())
+      .order("created_at", { ascending: false })
+      .limit(1);
+    if (data?.[0]) return data[0].id as string;
+  }
+  const { data } = await db
+    .from("leads")
+    .select("id")
+    .eq("workspace_id", workspaceId)
+    .like("capture_via", "embed:%")
+    .is("email_sha256", null)
+    .is("phone_sha256", null)
+    .gte("created_at", new Date(Date.now() - 15 * 60_000).toISOString())
+    .limit(2);
+  return data?.length === 1 ? (data[0].id as string) : null;
+}
+
+/** Adds contact details (hashed; raw encrypted per workspace policy) to an existing contact-less lead. */
+export async function attachContact(workspaceId: string, leadId: string, c: { email?: string | null; phone?: string | null; name?: string | null }) {
+  const db = admin();
+  const ws = must(await db.from("workspaces").select("currency,settings").eq("id", workspaceId).single(), "workspace");
+  const settings = (ws.settings ?? {}) as { storeRawPii?: boolean; piiRetentionDays?: number; phoneCountryCode?: string };
+  const cc = settings.phoneCountryCode ?? (ws.currency === "PHP" ? "63" : "1");
+  await db
+    .from("leads")
+    .update({ email_sha256: hashEmail(c.email), email_sha256_ms: hashEmailMicrosoft(c.email), phone_sha256: hashPhone(c.phone, cc) })
+    .eq("id", leadId)
+    .eq("workspace_id", workspaceId);
+  if (settings.storeRawPii !== false && (c.email || c.phone || c.name)) {
+    const days = settings.piiRetentionDays ?? 30;
+    await db.from("lead_pii").upsert({
+      lead_id: leadId,
+      workspace_id: workspaceId,
+      enc_email: c.email ? encrypt(c.email.trim()) : null,
+      enc_phone: c.phone ? encrypt(c.phone.trim()) : null,
+      enc_name: c.name ? encrypt(c.name.trim()) : null,
+      purge_after: new Date(Date.now() + days * 86_400_000).toISOString(),
+    });
+  }
 }

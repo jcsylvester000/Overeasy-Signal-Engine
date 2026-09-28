@@ -121,3 +121,22 @@ The paths are the tag (any CMS: WordPress, Webflow, Wix, Squarespace, Shopify, G
 - Platform access applications (these take calendar time): Google OAuth verification (Data Manager scope) and Ads API Basic access, the GHL Marketplace app, and a Microsoft Ads developer token.
 - Re-check the Google Data Manager and Microsoft field names against current docs before switching any connection to `test` or `live`.
 - OAuth connect flows turn on once the client IDs are issued; token storage (Vault) and refresh are already implemented.
+
+
+## Branding
+
+- **Platform brand (Overeasy)**: logo lockup, icon and favicons in `public/brand/` (built from the Overeasy logo pack; the horizontal lockup is generated from the master SVG). Tokens live in `src/lib/brand.ts` (`OVEREASY_BRAND`):
+  - Colours: Black `#272727` (primary: buttons, links, focus), Orange `#FA942B` (accent), White `#FDF8F3` (page canvas), Yellow `#F9BE61`, Light yellow `#FFFFB1`.
+  - Type: Work Sans (body and UI, loaded from Google Fonts). The brand display font Cubano is not on Google Fonts; add a licensed web-font file to `public/brand/` to use it for headings.
+- **Where it shows**: the public site and sign-in on the platform domain, the platform organization and Overeasy's **direct** clients.
+- **White-label**: anything under a **partner** organization uses the partner's own brand (Org → Branding) over a neutral default. The Overeasy name, logo, font and colours never appear there. `PLATFORM_BRAND=none` turns the Overeasy brand off entirely.
+
+## Website tag v1.1 (form tracking)
+
+One line on any site: `<script async src="https://<tag host>/ose.js" data-site="SITE_KEY"></script>`. It only observes: it never cancels or changes a submit.
+
+- Binds forms added after page load (popups, single-page apps, page builders).
+- Counts a lead only after a success signal (success message, form hidden or replaced, page change, or 8 s with no validation errors). Leads with validation errors are dropped. Turn this off with `data-confirm="off"`.
+- Embedded third-party forms (HubSpot, Typeform, JotForm, Calendly, GoHighLevel, Tally, and others) are detected through their own submit messages. `data-embed-params="on"` passes `ose_visitor` and click IDs into them. A CRM workflow event carrying `ose_visitor` then merges into the same lead.
+- A diagnostics ping (form and field names only, no values) feeds **Sites → Forms found**. **Check install** fetches the site and looks for the snippet.
+- Migration `20261002000000_tag_diagnostics.sql` is required.

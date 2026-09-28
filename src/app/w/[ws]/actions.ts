@@ -270,6 +270,17 @@ export async function updateOrigins(wsId: string, siteId: string, fd: FormData) 
   revalidatePath(`/w/${wsId}/sites`);
 }
 
+export async function checkSiteInstall(wsId: string, siteId: string) {
+  const { ws, db } = await ctx(wsId, 3);
+  const { data: site } = await db.from("sites").select("id,domain,site_key").eq("id", siteId).eq("workspace_id", ws.id).maybeSingle();
+  if (!site) return go(wsId, "/sites", { error: "Site not found" });
+  const { checkInstall } = await import("@/server/install-check");
+  const result = await checkInstall(site.domain, site.site_key);
+  await db.from("sites").update({ last_check: result }).eq("id", site.id);
+  revalidatePath(`/w/${wsId}/sites`);
+  go(wsId, "/sites", { site: site.id });
+}
+
 export type SecretState = { secret?: string; error?: string } | null;
 
 export async function createApiKey(wsId: string, _prev: SecretState, fd: FormData): Promise<SecretState> {

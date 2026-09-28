@@ -4,7 +4,9 @@ import { nowMs } from "@/lib/time";
 import { userClient } from "@/lib/supabase/server";
 import { SecretForm } from "@/components/secret-form";
 import { Badge, Button, Card, Field, Notice, PageHeader, Table, Td, when } from "@/components/ui";
-import { addSite, createApiKey, revokeApiKey, rotateWebhookSecret, updateOrigins } from "../actions";
+import { addSite, checkSiteInstall, createApiKey, revokeApiKey, rotateWebhookSecret, updateOrigins } from "../actions";
+import { CopyBlock, InstallGuide } from "@/components/install-guide";
+import type { InstallCheck } from "@/server/install-check";
 import { addWebhook, removeWebhook, testWebhook } from "../ops-actions";
 import { OUTBOUND_EVENTS } from "@/server/outbound";
 
@@ -34,7 +36,25 @@ export default async function Sites({ params, searchParams }: { params: Promise<
       : [{ data: [] as never[] }, { data: [] as never[] }];
   const selected = sites?.find((s) => s.id === sp.site) ?? sites?.[0];
   const { data: recentVisits } = selected ? await sb.from("visits").select("created_at,touch,gclid,gbraid,wbraid,msclkid,utm_source,utm_campaign,landing_url").eq("site_id", selected.id).order("created_at", { ascending: false }).limit(25) : { data: [] };
-  const { data: recentLeads } = selected ? await sb.from("leads").select("id,created_at,form,score,lead_type,source").eq("site_id", selected.id).order("created_at", { ascending: false }).limit(25) : { data: [] };
+  const { data: recentLeads } = selected ? await sb.from("leads").select("id,created_at,form,score,lead_type,source,capture_via").eq("site_id", selected.id).order("created_at", { ascending: false }).limit(25) : { data: [] };
+  const since = new Date(nowMs() - 30 * 86_400_000).toISOString();
+  const [{ data: pages }, { data: leads30 }] = selected
+    ? await Promise.all([
+        sb.from("site_pages").select("path,forms,embeds,hits,last_seen_at,tag_version").eq("site_id", selected.id).order("last_seen_at", { ascending: false }).limit(40),
+        sb.from("leads").select("form,capture_via").eq("site_id", selected.id).gte("created_at", since).limit(5000),
+      ])
+    : [{ data: [] }, { data: [] }];
+  // Leads per form (30 days), and how they were confirmed.
+  const perForm = new Map<string, { n: number; via: Record<string, number> }>();
+  for (const l of leads30 ?? []) {
+    const k = l.form ?? "—";
+    const e = perForm.get(k) ?? { n: 0, via: {} };
+    e.n++;
+    const v = l.capture_via ?? "submit";
+    e.via[v] = (e.via[v] ?? 0) + 1;
+    perForm.set(k, e);
+  }
+  type PageForm = { n: string; k: string[]; e: boolean; t: boolean };
 
   return (
     <>
@@ -55,22 +75,68 @@ export default async function Sites({ params, searchParams }: { params: Promise<
               }
               description={`Last event ${when(s.last_event_at)} · tag ${s.tag_version ?? "—"}`}
             >
-              <div className="text-xs font-medium">1. Paste before &lt;/head&gt; (or use Google Tag Manager → Custom HTML)</div>
-              <pre className="mt-1 overflow-x-auto rounded bg-gray-900 p-3 text-xs text-gray-100">{`<script async src="${tagOrigin}/ose.js" data-site="${s.site_key}"></script>`}</pre>
-              <p className="mt-1 text-xs text-muted">
-                EU/UK/Swiss visitors: add <code>data-consent=&quot;required&quot;</code> to the script tag. The tag then stores and sends nothing until the site&apos;s consent banner grants <code>ad_storage</code> (Google Consent Mode), or you call <code>ose.consent(&#123; ad_storage: &quot;granted&quot; &#125;)</code>.
-              </p>
-              <div className="mt-3 text-xs font-medium">2. Optional: name forms and fields explicitly, or send a lead from JavaScript</div>
-              <pre className="mt-1 overflow-x-auto rounded bg-gray-50 p-3 text-xs">{`<form data-ose-form="quote"> <input name="email" data-ose-field="email"> … </form>
+              {(() => {
+                const check = s.last_check as InstallCheck | null;
+                const snippet = `<script async src="${tagOrigin}/ose.js" data-site="${s.site_key}"></script>`;
+                return (
+                  <>
+                    <div className="mb-4 grid gap-3 rounded border border-line p-3 sm:grid-cols-[1fr_auto] sm:items-center">
+                      <div className="text-sm">
+                        <div className="font-medium">
+                          {fresh ? "Tag detected: live" : s.last_event_at ? "Tag installed, but quiet" : "Tag not detected yet"}
+                        </div>
+                        <div className="text-xs text-muted">
+                          {fresh
+                            ? `Last event ${when(s.last_event_at)} · tag ${s.tag_version ?? "—"}. Forms found are listed below.`
+                            : s.last_event_at
+                              ? `Last event ${when(s.last_event_at)}. Check that the snippet is still on the site.`
+                              : "Install the snippet below, then open the site in a browser. This turns green within seconds."}
+                        </div>
+                        {check && (
+                          <div className="mt-1 text-xs">
+                            <Badge tone={check.status === "found" ? "green" : check.status === "via_tag_manager" ? "blue" : "amber"}>{check.status.replace(/_/g, " ")}</Badge>{" "}
+                            <span className="text-muted">
+                              Checked {when(check.at)}: {check.detail}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                      <form action={checkSiteInstall.bind(null, ws.id, s.id)}>
+                        <Button variant="secondary">Check install</Button>
+                      </form>
+                    </div>
+                    <div className="text-xs font-medium">Install: pick where the site is built</div>
+                    <div className="mt-2">
+                      <InstallGuide snippet={snippet} />
+                    </div>
+                    <details className="mt-4 text-sm">
+                      <summary className="cursor-pointer text-xs font-medium">Options: consent, confirmation, embedded forms, custom forms</summary>
+                      <div className="mt-2 space-y-2 text-xs">
+                        <p>Add any of these to the script tag:</p>
+                        <ul className="list-disc space-y-1 pl-5">
+                          <li><code>data-consent=&quot;required&quot;</code>: EU/UK/Swiss sites. Nothing is stored or sent until the consent banner grants <code>ad_storage</code>.</li>
+                          <li><code>data-confirm=&quot;off&quot;</code>: count a lead as soon as the form is submitted. By default a lead counts only after a success message, the form hiding, or a page change, and is dropped if validation errors appear.</li>
+                          <li><code>data-embed-params=&quot;on&quot;</code>: pass the visitor id and click ids into embedded forms (GoHighLevel, Typeform, JotForm, HubSpot…) so CRM hidden fields can carry them.</li>
+                          <li><code>data-embed-origins=&quot;forms.client.com&quot;</code>: treat iframes from these hosts (for example a CRM&apos;s custom form domain) as embedded forms.</li>
+                          <li><code>data-embeds=&quot;off&quot;</code>: ignore embedded third-party forms.</li>
+                        </ul>
+                        <CopyBlock
+                          dark={false}
+                          text={`<form data-ose-form="quote"> <input name="email" data-ose-field="email"> … </form>
 <form data-ose-ignore> … never tracked … </form>
+<div data-ose-success>Thanks!</div>   <!-- marks a custom success message -->
 
 <script>
   // Custom/React forms: call after your own submit succeeds
   window.ose && ose.lead({ form: "quote", email, phone, answers: { service: "install" } })
-</script>`}</pre>
-              <p className="mt-2 text-xs text-muted">
-                Checklist: forms submit with POST (no personal data in URLs) · one tag manager container · auto-tagging on in Google Ads and Microsoft Ads · privacy policy discloses sharing with ad platforms.
-              </p>
+</script>`}
+                        />
+                        <p className="text-muted">Never tracked: password and login forms, card, bank and ID-number fields, free-text messages.</p>
+                      </div>
+                    </details>
+                  </>
+                );
+              })()}
               <form action={updateOrigins.bind(null, ws.id, s.id)} className="mt-3 flex flex-wrap items-end gap-2">
                 <Field label="Allowed origins" hint="Only pages on these origins can send events with this site key.">
                   <input name="origins" defaultValue={(s.allowed_origins ?? []).join(" ")} className="w-[28rem] max-w-full" />
@@ -94,6 +160,35 @@ export default async function Sites({ params, searchParams }: { params: Promise<
         </Card>
 
         {selected && (
+          <Card title={`Forms found — ${selected.domain}`} description="Forms and embedded forms the tag has seen, per page (field names only, never values), with leads in the last 30 days.">
+            <Table head={["Page", "Form", "Fields", "Leads (30 d)", "Confirmed by", "Last seen"]} empty="Nothing yet. Open a page with a form on the site (tag 1.1 or later).">
+              {(pages ?? []).flatMap((pg) => {
+                const forms = (pg.forms as PageForm[]) ?? [];
+                const embeds = (pg.embeds as string[]) ?? [];
+                const rows = [
+                  ...forms.map((f) => ({ key: `${pg.path}|${f.n}`, name: f.n, fields: `${f.k.length} fields${f.e ? " · email" : ""}${f.t ? " · phone" : ""}`, stats: perForm.get(f.n) })),
+                  ...embeds.map((v) => ({ key: `${pg.path}|embed:${v}`, name: `${v} (embedded)`, fields: "inside iframe", stats: perForm.get(`${v} form`) ?? perForm.get(`${v} booking`) })),
+                ];
+                if (!rows.length) rows.push({ key: `${pg.path}|none`, name: "—", fields: "no forms on this page", stats: undefined });
+                return rows.map((r) => (
+                  <tr key={r.key}>
+                    <Td mono>{pg.path}</Td>
+                    <Td>{r.name}</Td>
+                    <Td className="text-xs">{r.fields}</Td>
+                    <Td className="num">{r.stats?.n ?? 0}</Td>
+                    <Td className="text-xs">{r.stats ? Object.entries(r.stats.via).map(([k, n]) => `${k} ${n}`).join(" · ") : "—"}</Td>
+                    <Td>{when(pg.last_seen_at)}</Td>
+                  </tr>
+                ));
+              })}
+            </Table>
+            <p className="mt-2 text-xs text-muted">
+              Confirmed by: <b>success</b> = success message shown · <b>form-hidden</b> = form replaced by a thank-you · <b>navigated</b> = went to the next page · <b>timeout</b> = no errors after 8 s · <b>embed:…</b> = embedded form&apos;s own submit event.
+            </p>
+          </Card>
+        )}
+
+        {selected && (
           <Card title={`Live event debugger — ${selected.domain}`} description="Last 25 ad visits and leads received from this site.">
             <div className="grid gap-6 lg:grid-cols-2">
               <Table head={["When", "Touch", "Click ID", "Source / campaign"]} empty="No ad visits yet. Open the site with ?gclid=TEST123 to test.">
@@ -115,7 +210,7 @@ export default async function Sites({ params, searchParams }: { params: Promise<
                     <Td>{l.form}</Td>
                     <Td className="num">{l.score}</Td>
                     <Td>{l.lead_type}</Td>
-                    <Td>{l.source}</Td>
+                    <Td>{l.capture_via ?? l.source}</Td>
                   </tr>
                 ))}
               </Table>

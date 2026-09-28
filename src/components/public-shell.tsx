@@ -11,11 +11,11 @@ export function PublicShell({ brand, signedIn, children }: { brand: Brand; signe
           <Link href="/" className="flex items-center gap-2 font-semibold text-brand">
             {brand.logoUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={brand.logoUrl} alt="" className="h-7" />
+              <img src={brand.logoUrl} alt={brand.logoLabel ? brand.appName.replace(brand.logoLabel, "").trim() : ""} className="h-7 w-auto" />
             ) : (
               <span aria-hidden className="inline-block h-5 w-5 rounded bg-brand" />
             )}
-            {brand.appName}
+            {brand.logoUrl ? (brand.logoLabel ?? brand.appName) : brand.appName}
           </Link>
           <nav className="flex items-center gap-4 text-sm">
             <Link href="/docs" className="text-muted hover:text-ink">

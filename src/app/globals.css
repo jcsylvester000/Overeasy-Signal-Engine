@@ -14,13 +14,13 @@
   --color-line: #e5e7eb;
   --color-panel: #ffffff;
   --color-canvas: #f6f7f9;
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-sans: var(--brand-font, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif);
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 html,
 body {
-  background: var(--color-canvas);
+  background: var(--brand-canvas, var(--color-canvas));
   color: var(--color-ink);
 }
 

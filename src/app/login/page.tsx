@@ -14,8 +14,11 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       <div className="w-full max-w-sm">
         <div className="mb-6 text-center">
           {brand.logoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={brand.logoUrl} alt={brand.appName} className="mx-auto h-10" />
+            <>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={brand.logoUrl} alt={brand.appName} className="mx-auto h-10 w-auto" />
+              {brand.logoLabel && <div className="mt-2 text-sm font-semibold tracking-wide">{brand.logoLabel}</div>}
+            </>
           ) : (
             <div className="text-lg font-semibold text-brand">{brand.appName}</div>
           )}

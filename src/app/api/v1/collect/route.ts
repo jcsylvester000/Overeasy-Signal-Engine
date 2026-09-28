@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
  */
 const Beacon = z.object({
   k: z.string().min(8).max(64), // site key
-  t: z.enum(["visit", "lead"]),
+  t: z.enum(["visit", "lead", "ping"]),
   v: z.string().min(8).max(64), // visitor id
   tv: z.string().max(20).optional(), // tag version
   a: Attribution.optional(),
@@ -25,6 +25,15 @@ const Beacon = z.object({
       geo: z.string().max(100).nullish(),
       answers: z.record(z.string().max(48), z.union([z.string().max(500), z.number(), z.null()])).default({}),
       test: z.boolean().optional(),
+      via: z.string().max(40).optional(),
+    })
+    .optional(),
+  // Diagnostics ping (tag ≥ 1.1): forms / embedded forms found on a page. Field NAMES only, never values.
+  p: z
+    .object({
+      path: z.string().max(200),
+      forms: z.array(z.object({ n: z.string().max(100), k: z.array(z.string().max(48)).max(25), e: z.boolean(), t: z.boolean() })).max(20),
+      embeds: z.array(z.string().max(30)).max(20),
     })
     .optional(),
 });
@@ -76,6 +85,12 @@ export async function POST(req: Request) {
 
   await db.from("sites").update({ last_event_at: new Date().toISOString(), ...(b.tv ? { tag_version: b.tv } : {}) }).eq("id", site.id);
 
+  if (b.t === "ping") {
+    if (!b.p) return problem(422, "Missing ping payload", h);
+    await db.rpc("ose_site_ping", { p_site: site.id, p_ws: site.workspace_id, p_path: b.p.path || "/", p_forms: b.p.forms, p_embeds: b.p.embeds, p_version: b.tv ?? null });
+    return json({ ok: true }, 200, h);
+  }
+
   if (b.t === "visit") {
     const a = b.a ?? {};
     const hasTouch = Boolean(a.gclid || a.gbraid || a.wbraid || a.msclkid || a.fbclid || a.utm_source || a.utm_campaign);
@@ -103,6 +118,7 @@ export async function POST(req: Request) {
     attribution: b.a,
     consent: b.c,
     test: b.l.test,
+    via: b.l.via ?? "submit",
   });
   // The browser gets the lead id and score so the site's thank-you tag can fire a valued conversion with the same transaction id.
   return json({ ok: true, lead_id: result.lead_id, score: result.score, lead_type: result.lead_type }, 200, h);

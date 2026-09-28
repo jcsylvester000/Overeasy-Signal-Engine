@@ -204,6 +204,7 @@ export function workflowFields(f: Record<string, string>) {
     value: pick("value", "actual_value", "lead_value", "monetary_value", "opportunity_value", "opportunity_monetary_value"),
     lostReason: pick("lost_reason", "opportunity_lost_reason_id"),
     leadId: pick("ose_lead_id", "lead_id"),
+    visitorId: pick("ose_visitor", "contact_ose_visitor", "visitor_id"),
     attribution: Object.fromEntries(CLICK_KEYS.map((k) => [k, f[k]]).filter(([, v]) => v)) as Record<string, string>,
   };
 }
@@ -211,6 +212,15 @@ export function workflowFields(f: Record<string, string>) {
 async function processWorkflow(workspaceId: string, payload: Record<string, unknown>) {
   const w = workflowFields(flattenWorkflowPayload(payload));
   let leadId = await findLead(workspaceId, "ghl", { leadId: w.leadId, opportunityId: w.opportunityId, contactId: w.contactId, email: w.email, phone: w.phone });
+  if (!leadId && (w.email || w.phone)) {
+    const { findAnonymousEmbedLead, attachContact } = await import("./intake");
+    // An embedded form on the website may already have created a contact-less lead: merge instead of duplicating.
+    const anon = await findAnonymousEmbedLead(workspaceId, w.visitorId);
+    if (anon) {
+      await attachContact(workspaceId, anon, { email: w.email, phone: w.phone, name: w.name });
+      leadId = anon;
+    }
+  }
   if (!leadId && (w.email || w.phone)) {
     // CRM-only lead (e.g. a GHL form without the website tag): create it so its journey is tracked.
     const { intakeLead } = await import("./intake");

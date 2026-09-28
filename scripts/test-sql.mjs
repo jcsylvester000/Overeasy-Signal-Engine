@@ -97,5 +97,14 @@ const ctxA = (await as(A, "select ose_workspace_context('20000000-0000-0000-0000
 check("context: A gets own workspace with rank and org chain", Boolean(ctxA) && ctxA.rank === 4 && ctxA.orgs.length === 2 && !("webhook_secret_enc" in ctxA.workspace));
 check("context: A gets null for B's workspace", (await as(A, "select ose_workspace_context('20000000-0000-0000-0000-000000000002') as c"))[0].c === null);
 
+// Tag diagnostics: ping upsert (service role only), tenant-isolated reads
+const siteA = (await db.query(`select id from sites where site_key = 'k3'`)).rows[0].id;
+await db.query(`select ose_site_ping($1, '20000000-0000-0000-0000-000000000001', '/quote', '[{"n":"quote","k":["email"],"e":true,"t":false}]', '["typeform"]', '1.1.0')`, [siteA]);
+await db.query(`select ose_site_ping($1, '20000000-0000-0000-0000-000000000001', '/quote', '[]', '[]', '1.1.0')`, [siteA]);
+check("site ping upserts and counts hits", (await db.query(`select hits from site_pages where site_id = $1 and path = '/quote'`, [siteA])).rows[0]?.hits === 2);
+check("site_pages: A sees own pages", (await as(A, "select path from site_pages")).length === 1);
+check("site_pages: B sees none of A's pages", (await as(B, "select path from site_pages")).length === 0);
+check("authenticated cannot call ose_site_ping", await as(A, `select ose_site_ping('${siteA}', '20000000-0000-0000-0000-000000000001', '/x', '[]', '[]', 'x')`).then(() => false, () => true));
+
 console.log(failures ? `\n${failures} check(s) failed` : "\nAll SQL checks passed");
 process.exit(failures ? 1 : 0);

@@ -8,11 +8,11 @@ export function TopBar({ brand, email, children }: { brand: Brand; email?: strin
         <Link href="/app" className="flex items-center gap-2 font-semibold text-brand">
           {brand.logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={brand.logoUrl} alt="" className="h-6" />
+            <img src={brand.logoUrl} alt={brand.logoLabel ? brand.appName.replace(brand.logoLabel, "").trim() : ""} className="h-6 w-auto" />
           ) : (
             <span aria-hidden className="inline-block h-5 w-5 rounded bg-brand" />
           )}
-          <span>{brand.appName}</span>
+          <span>{brand.logoUrl ? (brand.logoLabel ?? brand.appName) : brand.appName}</span>
         </Link>
         <div className="flex-1 text-sm">{children}</div>
         {email && (
