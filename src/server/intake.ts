@@ -78,7 +78,8 @@ export async function intakeLead(input: IntakeBody & { workspaceId: string; site
     if (existing) return { lead_id: existing.id as string, score: Number(existing.score), lead_type: existing.lead_type as string, score_version: existing.score_version as number, duplicate: true };
   }
 
-  const ws = must(await db.from("workspaces").select("id,org_id,currency,settings").eq("id", input.workspaceId).single(), "workspace");
+  const ws = must(await db.from("workspaces").select("id,org_id,currency,settings,archived_at").eq("id", input.workspaceId).single(), "workspace");
+  if (ws.archived_at) throw new Error("Workspace is archived");
   const settings = (ws.settings ?? {}) as { storeRawPii?: boolean; piiRetentionDays?: number; phoneCountryCode?: string };
 
   // 1. Attribution: first/last touch recorded by /v1/collect for this visitor.

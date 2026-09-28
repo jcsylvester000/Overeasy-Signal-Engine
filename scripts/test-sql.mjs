@@ -106,5 +106,25 @@ check("site_pages: A sees own pages", (await as(A, "select path from site_pages"
 check("site_pages: B sees none of A's pages", (await as(B, "select path from site_pages")).length === 0);
 check("authenticated cannot call ose_site_ping", await as(A, `select ose_site_ping('${siteA}', '20000000-0000-0000-0000-000000000001', '/x', '[]', '[]', 'x')`).then(() => false, () => true));
 
+// Team CRM (migration 20261003 ran before the fixtures, so add team rows explicitly)
+const AGA = "10000000-0000-0000-0000-000000000002";
+await db.exec(`
+  insert into team_members (org_id, user_id, team_role) values ('${AGA}', '${A}', 'admin');
+  insert into team_tasks (team_org_id, workspace_id, title, assignee_id) values ('${AGA}', '20000000-0000-0000-0000-000000000001', 'Call client', '${A}');
+  insert into notifications (user_id, kind, title) values ('${A}', 'test', 'for A'), ('${B}', 'test', 'for B');
+  insert into team_notes (team_org_id, workspace_id, author_id, body) values ('${AGA}', '20000000-0000-0000-0000-000000000001', '${A}', 'note');
+`);
+check("team: A (team admin) sees team members", (await as(A, "select user_id from team_members")).length === 1);
+check("team: B (not on team) sees no team members", (await as(B, "select user_id from team_members")).length === 0);
+check("team: A sees team tasks, B does not", (await as(A, "select id from team_tasks")).length === 1 && (await as(B, "select id from team_tasks")).length === 0);
+check("team: notes hidden from non-team users", (await as(B, "select id from team_notes")).length === 0);
+check("notifications: each user sees only their own", (await as(A, "select title from notifications")).map((r) => r.title).join() === "for A" && (await as(B, "select title from notifications")).map((r) => r.title).join() === "for B");
+check("team: authenticated cannot write tasks directly", await as(A, `insert into team_tasks (team_org_id, title) values ('${AGA}', 'x')`).then(() => false, () => true));
+const met = (await db.query(`select * from ose_team_ws_metrics(array['20000000-0000-0000-0000-000000000001']::uuid[])`)).rows[0];
+check("team metrics: one row with open task count", met && met.open_tasks === 1 && met.leads_30d >= 0);
+check("authenticated cannot call ose_team_ws_metrics", await as(A, `select * from ose_team_ws_metrics(array['20000000-0000-0000-0000-000000000001']::uuid[])`).then(() => false, () => true));
+await db.exec(`update workspaces set archived_at = now() where id = '20000000-0000-0000-0000-000000000002'`);
+check("archive: column works and row still visible to its org (for restore)", (await as(B, "select archived_at from workspaces")).length === 1);
+
 console.log(failures ? `\n${failures} check(s) failed` : "\nAll SQL checks passed");
 process.exit(failures ? 1 : 0);

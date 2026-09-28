@@ -7,9 +7,10 @@ import { cn } from "./ui";
 
 export type TemplateSummary = { id: string; name: string; description: string; leadTypes: string[]; fields: number; regulated: boolean; currency: string };
 type State = { error?: string } | null;
-type Props = { orgName: string; cancelHref: string; templates: TemplateSummary[]; zones: string[]; action: (prev: State, fd: FormData) => Promise<State> };
+type Opt = { id: string; label: string };
+type Props = { orgs: Opt[]; defaultOrg?: string; team: Opt[]; cancelHref: string; templates: TemplateSummary[]; zones: string[]; action: (prev: State, fd: FormData) => Promise<State> };
 
-const STEPS = ["Business", "Industry", "Client access", "Review"] as const;
+const STEPS = ["Business", "Industry", "Access", "Review"] as const;
 const CURRENCIES = ["USD", "CAD", "GBP", "EUR", "AUD", "PHP"];
 const ROLES = [
   { id: "client_viewer", label: "Client viewer", hint: "Sees results only" },
@@ -26,11 +27,13 @@ function Submit() {
   );
 }
 
-export function WorkspaceWizard({ orgName, cancelHref, templates, zones, action }: Props) {
+export function WorkspaceWizard({ orgs, defaultOrg, team, cancelHref, templates, zones, action }: Props) {
   const [state, formAction] = useActionState(action, null);
   const [step, setStep] = useState(0);
   const [stepError, setStepError] = useState<string | null>(null);
+  const [members, setMembers] = useState<string[]>([]);
   const [v, setV] = useState(() => ({
+    org_id: orgs.find((o) => o.id === defaultOrg)?.id ?? orgs[0]?.id ?? "",
     name: "",
     domain: "",
     timezone: "America/New_York",
@@ -42,9 +45,11 @@ export function WorkspaceWizard({ orgName, cancelHref, templates, zones, action 
   }));
   const set = <K extends keyof typeof v>(k: K, val: (typeof v)[K]) => setV((x) => ({ ...x, [k]: val }));
   const tpl = templates.find((t) => t.id === v.template) ?? templates[0];
+  const orgName = orgs.find((o) => o.id === v.org_id)?.label ?? "";
 
   function validate(s: number): string | null {
     if (s === 0) {
+      if (!v.org_id) return "Choose the organization this client belongs to.";
       if (v.name.trim().length < 2) return "Enter the client or business name.";
       const d = v.domain.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
       if (d && !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(d)) return "The website domain looks wrong. Use a form like example.com.";
@@ -75,6 +80,9 @@ export function WorkspaceWizard({ orgName, cancelHref, templates, zones, action 
       className="rounded-lg border border-line bg-panel shadow-sm"
     >
       {/* Everything is submitted at the end; hidden inputs carry values from earlier steps. */}
+      {members.map((m) => (
+        <input key={m} type="hidden" name="team_member" value={m} />
+      ))}
       {Object.entries(v).map(([k, val]) => (typeof val === "boolean" ? (val ? <input key={k} type="hidden" name={k} value="on" /> : null) : <input key={k} type="hidden" name={k} value={val} />))}
 
       <ol className="flex border-b border-line text-xs sm:text-sm" aria-label="Steps">
@@ -101,6 +109,19 @@ export function WorkspaceWizard({ orgName, cancelHref, templates, zones, action 
               <h2 className="text-base font-semibold">About the client</h2>
               <p className="text-sm text-muted">One workspace is one client business under {orgName}: its website, CRM pipeline and ad accounts.</p>
             </div>
+            {orgs.length > 1 && (
+              <label className="block">
+                <span className="text-xs font-medium">Organization</span>
+                <select value={v.org_id} onChange={(e) => set("org_id", e.target.value)} className="mt-1 w-full">
+                  {orgs.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="mt-1 block text-xs text-muted">Who manages this client: your own agency, a partner agency or a direct client organization.</span>
+              </label>
+            )}
             <label className="block">
               <span className="text-xs font-medium">Client / business name</span>
               <input autoFocus value={v.name} onChange={(e) => set("name", e.target.value)} placeholder="Acme Land Co" className="mt-1 w-full" />
@@ -179,7 +200,21 @@ export function WorkspaceWizard({ orgName, cancelHref, templates, zones, action 
 
         {step === 2 && (
           <>
-            <div>
+            {team.length > 0 && (
+              <fieldset>
+                <legend className="text-base font-semibold">Assign your team</legend>
+                <p className="text-sm text-muted">Assigned members see this workspace on their board and get its alerts and milestones.</p>
+                <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+                  {team.map((m) => (
+                    <label key={m.id} className={cn("flex items-center gap-2 rounded-md border p-2 text-sm", members.includes(m.id) ? "border-brand" : "border-line")}>
+                      <input type="checkbox" checked={members.includes(m.id)} onChange={(e) => setMembers((x) => (e.target.checked ? [...x, m.id] : x.filter((y) => y !== m.id)))} />
+                      {m.label}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            )}
+            <div className={team.length ? "border-t border-line pt-4" : ""}>
               <h2 className="text-base font-semibold">Give the client access (optional)</h2>
               <p className="text-sm text-muted">Invite someone at the client to see this workspace only. They get an email to set a password. You can skip this and invite people later.</p>
             </div>
@@ -211,6 +246,8 @@ export function WorkspaceWizard({ orgName, cancelHref, templates, zones, action 
               <p className="text-sm text-muted">After this you land on the setup checklist: install the tracking snippet, connect the CRM, then the ad accounts.</p>
             </div>
             <dl className="grid gap-x-6 gap-y-2 rounded-md border border-line p-3 text-sm sm:grid-cols-[10rem_1fr]">
+              <dt className="text-muted">Organization</dt>
+              <dd>{orgName}</dd>
               <dt className="text-muted">Client</dt>
               <dd className="font-medium">{v.name}</dd>
               <dt className="text-muted">Website</dt>
@@ -221,6 +258,8 @@ export function WorkspaceWizard({ orgName, cancelHref, templates, zones, action 
               </dd>
               <dt className="text-muted">Industry template</dt>
               <dd>{tpl?.name}</dd>
+              <dt className="text-muted">Team</dt>
+              <dd>{members.length ? members.map((id) => team.find((t) => t.id === id)?.label).join(", ") : "Nobody assigned yet"}</dd>
               <dt className="text-muted">Client access</dt>
               <dd>{v.invite_email ? `${v.invite_email} (${ROLES.find((r) => r.id === v.invite_role)?.label})` : "No invite"}</dd>
               <dt className="text-muted">Ad platforms · CRM</dt>
@@ -254,7 +293,7 @@ export function WorkspaceWizard({ orgName, cancelHref, templates, zones, action 
           )}
           {step < STEPS.length - 1 ? (
             <button type="button" onClick={next} className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:opacity-90">
-              {step === 2 && !v.invite_email ? "Skip for now" : "Continue"}
+              {step === 2 && !v.invite_email && !members.length ? "Skip for now" : "Continue"}
             </button>
           ) : v.attest ? (
             <Submit />

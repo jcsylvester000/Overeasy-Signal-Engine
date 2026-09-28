@@ -140,3 +140,28 @@ One line on any site: `<script async src="https://<tag host>/ose.js" data-site="
 - Embedded third-party forms (HubSpot, Typeform, JotForm, Calendly, GoHighLevel, Tally, and others) are detected through their own submit messages. `data-embed-params="on"` passes `ose_visitor` and click IDs into them. A CRM workflow event carrying `ose_visitor` then merges into the same lead.
 - A diagnostics ping (form and field names only, no values) feeds **Sites → Forms found**. **Check install** fetches the site and looks for the snippet.
 - Migration `20261002000000_tag_diagnostics.sql` is required.
+
+## Team CRM (agency team area: `/team`)
+
+Internal to the agency; client users (client viewers) never see it. Migration `20261003000000_team_crm.sql` is required. It backfills existing org-level owners and admins as team members.
+
+| Team role | Backed by | Can |
+|---|---|---|
+| Super-admin | org membership `owner` | Everything, including managing super-admins and permanently deleting archived workspaces |
+| Admin | org membership `admin` | Add and edit members, set temporary passwords, send reset emails, assign workspaces, create, edit and delete (archive) workspaces, team overview, audit log |
+| User | one workspace membership per assignment (`manager` or `analyst`) | Their assigned workspaces, tasks, reminders, notes and notifications |
+
+- **Logins** live in Supabase Auth; passwords are hashed there and never stored in app tables. An admin either sets a temporary password, which the member must change at first sign-in (enforced in `src/proxy.ts`), or sends an invite email. Disabling a member bans the login.
+- **Pages:**
+  - My board: workspaces ranked by attention score, my tasks, reminders, notifications.
+  - Tasks: list or board, filters, due-date range, pagination.
+  - Notifications.
+  - Workspace team page: metrics, tasks, internal notes, assigned team, activity.
+  - Team overview: workload, unassigned workspaces, health ranking.
+  - Members & access.
+  - Audit log: date range, action type, member, workspace, pagination and CSV export.
+- **Notification sources:**
+  - Warning and critical alerts in assigned workspaces (admins get them when nobody is assigned).
+  - Contract and funded milestones.
+  - Task assigned or done, overdue tasks, task reminders, and personal reminders (checked every 5 minutes by the Inngest retry sweep, and whenever someone opens a team page).
+- **Workspace delete:** archives the workspace (hidden; stops accepting website and CRM events) with a 30-day restore window. It is then purged by the retention sweep, or right away by a super-admin using "Delete permanently".

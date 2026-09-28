@@ -18,6 +18,7 @@ export type Workspace = {
   timezone: string;
   currency: string;
   settings: Record<string, unknown>;
+  archived_at?: string | null;
 };
 
 export type Org = { id: string; parent_id: string | null; type: "platform" | "partner" | "direct"; name: string; slug: string; brand: Record<string, unknown>; custom_domain: string | null; tag_domain: string | null };
@@ -56,12 +57,12 @@ export const workspaceAccess = cache(async (workspaceId: string) => {
   const ctx = await sb.rpc("ose_workspace_context", { ws: workspaceId });
   if (!ctx.error) {
     const c = ctx.data as { rank: number; workspace: Workspace; orgs: OrgWithSettings[] } | null;
-    if (!c) notFound();
+    if (!c || c.workspace.archived_at) notFound();
     const org = c.orgs.find((o) => o.id === c.workspace.org_id)!;
     return { ws: c.workspace, org, rank: Number(c.rank), chain: c.orgs };
   }
   const { data: ws } = await sb.from("workspaces").select("*").eq("id", workspaceId).maybeSingle<Workspace>();
-  if (!ws) notFound();
+  if (!ws || ws.archived_at) notFound();
   const [{ data: rank }, { data: org }] = await Promise.all([
     sb.rpc("ose_workspace_rank", { ws: workspaceId }),
     sb.from("organizations").select("*").eq("id", ws.org_id).maybeSingle<OrgWithSettings>(),

@@ -6,6 +6,7 @@ import { healthSweep, retentionSweep } from "@/server/health";
 import { syncSpend } from "@/server/spend";
 import { weeklyReports } from "@/server/notify";
 import { deliverOutbound } from "@/server/outbound";
+import { sweepTeam } from "@/server/team";
 import type { OseEvents } from "@/server/dispatch";
 
 /**
@@ -38,6 +39,7 @@ const retrySweep = inngest.createFunction(
   { id: "retry-sweep", concurrency: { limit: 1 }, triggers: [{ cron: "*/5 * * * *" }] },
   async ({ step }) => {
     await step.run("deliver-due", () => deliverPending());
+    await step.run("team-reminders", () => sweepTeam());
     return step.run("webhooks-due", () => deliverOutbound());
   },
 );

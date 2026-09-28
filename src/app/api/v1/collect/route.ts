@@ -38,7 +38,7 @@ const Beacon = z.object({
     .optional(),
 });
 
-type Site = { id: string; workspace_id: string; allowed_origins: string[] };
+type Site = { id: string; workspace_id: string; allowed_origins: string[]; workspaces?: { archived_at: string | null } | null };
 
 function cors(origin: string | null) {
   return origin ? { "access-control-allow-origin": origin, vary: "Origin", "access-control-allow-methods": "POST, OPTIONS", "access-control-allow-headers": "content-type" } : undefined;
@@ -78,8 +78,9 @@ export async function POST(req: Request) {
   const b = parsed.data;
 
   const db = admin();
-  const { data: site } = await db.from("sites").select("id,workspace_id,allowed_origins").eq("site_key", b.k).maybeSingle<Site>();
+  const { data: site } = await db.from("sites").select("id,workspace_id,allowed_origins,workspaces(archived_at)").eq("site_key", b.k).maybeSingle<Site>();
   if (!site) return problem(404, "Unknown site", h);
+  if (site.workspaces?.archived_at) return problem(410, "Workspace archived", h);
   if (!originAllowed(site, origin)) return problem(403, "Origin not allowed", h);
   if (rateLimited(`collect:site:${site.id}`, 3000)) return problem(429, "Too many requests", h);
 

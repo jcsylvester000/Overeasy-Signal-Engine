@@ -24,11 +24,19 @@ export async function proxy(req: NextRequest) {
   // getClaims(): refreshes an expiring session and verifies the JWT locally (no Auth-server round trip with asymmetric keys).
   const { data } = await sb.auth.getClaims();
   const path = req.nextUrl.pathname;
-  const protectedPath = path.startsWith("/app") || path.startsWith("/w/") || path.startsWith("/org/");
+  const protectedPath = path.startsWith("/app") || path.startsWith("/w/") || path.startsWith("/org/") || path.startsWith("/team");
   if (!data?.claims?.sub && protectedPath) {
     const to = req.nextUrl.clone();
     to.pathname = "/login";
     to.search = `?next=${encodeURIComponent(path)}`;
+    return NextResponse.redirect(to);
+  }
+  // A temporary password set by an admin must be changed before anything else.
+  const meta = data?.claims?.app_metadata as { must_change_password?: boolean } | undefined;
+  if (meta?.must_change_password && protectedPath && path !== "/app/account") {
+    const to = req.nextUrl.clone();
+    to.pathname = "/app/account";
+    to.search = "?must=1";
     return NextResponse.redirect(to);
   }
   return res;

@@ -61,6 +61,16 @@ export async function recordStage(args: {
   }
 
   await dispatch("ose/stage.recorded", { workspaceId: args.workspaceId, leadId: args.leadId, stage: args.stage });
+  if ((args.stage === "contract" || args.stage === "funded") && args.source !== "simulator") {
+    const { notifyWorkspaceTeam } = await import("./team");
+    await notifyWorkspaceTeam(args.workspaceId, {
+      kind: "milestone",
+      title: args.stage === "funded" ? "A lead was funded" : "A lead reached Contract",
+      body: args.actualValue ? `Value ${args.actualValue}` : null,
+      link: `/w/${args.workspaceId}/leads/${args.leadId}`,
+      dedupeKey: `stage:${args.leadId}:${args.stage}`,
+    });
+  }
   await emitEvent(args.workspaceId, "lead.stage_changed", { lead_id: args.leadId, stage: args.stage, occurred_at: args.occurredAt ?? new Date().toISOString(), lost_reason: args.lostReason ?? null });
   return { stage: next };
 }

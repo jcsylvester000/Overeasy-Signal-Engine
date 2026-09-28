@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Brand } from "@/lib/brand";
+import { TeamLinks } from "./team-links";
 
 export function TopBar({ brand, email, children }: { brand: Brand; email?: string | null; children?: React.ReactNode }) {
   return (
@@ -16,7 +17,8 @@ export function TopBar({ brand, email, children }: { brand: Brand; email?: strin
         </Link>
         <div className="flex-1 text-sm">{children}</div>
         {email && (
-          <div className="flex items-center gap-3 text-sm">
+          <div className="flex items-center gap-4 text-sm">
+            <TeamLinks />
             <Link href="/app/account" className="hidden text-muted hover:text-ink sm:inline">
               {email}
             </Link>

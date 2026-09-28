@@ -7,7 +7,7 @@ export async function healthSweep() {
   const db = admin();
   const now = Date.now();
 
-  const { data: sites } = await db.from("sites").select("id,workspace_id,domain,last_event_at,created_at");
+  const { data: sites } = await db.from("sites").select("id,workspace_id,domain,last_event_at,created_at,workspaces!inner(archived_at)").is("workspaces.archived_at", null);
   for (const s of sites ?? []) {
     const last = s.last_event_at ? new Date(s.last_event_at).getTime() : null;
     const age = now - (last ?? new Date(s.created_at).getTime());
@@ -42,6 +42,8 @@ export async function healthSweep() {
 /** Daily: purge raw PII past its retention date; drop raw webhook payloads older than 30 days. */
 export async function retentionSweep() {
   const db = admin();
+  const { purgeArchived } = await import("./team");
+  await purgeArchived(); // archived workspaces are removed for good after 30 days
   await db.from("lead_pii").delete().lt("purge_after", new Date().toISOString());
   await db.from("webhook_inbox").delete().lt("received_at", new Date(Date.now() - 30 * 86_400_000).toISOString());
   await db.from("idempotency_keys").delete().lt("created_at", new Date(Date.now() - 7 * 86_400_000).toISOString());

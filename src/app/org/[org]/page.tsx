@@ -6,8 +6,6 @@ import { TopBar } from "@/components/topbar";
 import { nowMs } from "@/lib/time";
 import { Badge, Button, Card, Field, Notice, PageHeader, Table, Td } from "@/components/ui";
 import { addChildOrg, invite, removeMember, saveBrand, saveSecurity } from "./actions";
-import { createDemo } from "@/app/app/actions";
-import { PendingButton } from "@/components/pending-button";
 
 export const metadata = { title: "Organization" };
 
@@ -20,7 +18,7 @@ export default async function OrgPage({ params, searchParams }: { params: Promis
   const db = admin();
   const [{ data: usage }, { data: wss }, { data: members }, { data: children }, brand] = await Promise.all([
     db.from("usage_monthly").select("*").eq("org_id", orgId).order("month", { ascending: false }).limit(60),
-    db.from("workspaces").select("*").eq("org_id", orgId).order("name"),
+    db.from("workspaces").select("*").eq("org_id", orgId).is("archived_at", null).order("name"),
     db.from("memberships").select("id,user_id,workspace_id,role,created_at").eq("org_id", orgId),
     db.from("organizations").select("*").eq("parent_id", orgId).order("name"),
     brandForOrg(orgId),
@@ -28,7 +26,7 @@ export default async function OrgPage({ params, searchParams }: { params: Promis
   const workspaces = (wss ?? []) as Workspace[];
   // Partner console (P-03): health across this organization's and its child organizations' client workspaces.
   const childIds = ((children ?? []) as Org[]).map((c) => c.id);
-  const { data: allWs } = await db.from("workspaces").select("id,name,org_id,settings").in("org_id", [orgId, ...childIds]);
+  const { data: allWs } = await db.from("workspaces").select("id,name,org_id,settings").in("org_id", [orgId, ...childIds]).is("archived_at", null);
   const since = new Date(nowMs() - 30 * 86_400_000).toISOString();
   const health = await Promise.all(
     (allWs ?? []).map(async (w) => {
@@ -64,7 +62,7 @@ export default async function OrgPage({ params, searchParams }: { params: Promis
         <Card
           title="Client workspaces"
           actions={
-            <Link href={`/org/${orgId}/workspaces/new?from=org`} className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white hover:opacity-90">
+            <Link href={`/app/workspaces/new?org=${orgId}&from=org`} className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white hover:opacity-90">
               + Add workspace
             </Link>
           }
@@ -184,11 +182,6 @@ export default async function OrgPage({ params, searchParams }: { params: Promis
           </form>
         </Card>
 
-        <Card title="Demo" description="A sample client workspace with 120 days of realistic data (dry-run uploads), for demos and training.">
-          <form action={createDemo.bind(null, orgId)}>
-            <PendingButton pendingText="Building demo data… (about 10–20 seconds)">Create demo workspace</PendingButton>
-          </form>
-        </Card>
 
         <Card title="White-label branding" description="Shown to this organization's users and clients, on its custom domain, and in reports and emails.">
           <form action={saveBrand.bind(null, orgId)} className="grid gap-3 sm:grid-cols-2">
