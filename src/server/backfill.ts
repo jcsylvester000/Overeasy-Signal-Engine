@@ -11,7 +11,7 @@ import { isCanonicalStage, rungIndex, RUNGS } from "@/core/stages";
  * Columns: created_at, stage, lead_type, campaign, platform, state, email, phone, funded_value, lost_reason, stage_date
  */
 export async function importHistory(workspaceId: string, csv: string) {
-  const [head, ...rows] = parseCsv(csv);
+  const [head, ...rows] = parseCsv(csv.replace(/^\uFEFF/, ""));
   if (!head) throw new Error("The file is empty.");
   const h = head.map((x) => x.trim().toLowerCase());
   const col = (n: string) => h.indexOf(n);

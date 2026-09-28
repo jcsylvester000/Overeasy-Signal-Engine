@@ -60,7 +60,7 @@ export async function syncSpend(workspaceId?: string, days = 7) {
  * Columns (header row, any order): date, platform, campaign, campaign_id, cost, clicks, impressions, geo, adgroup_id
  */
 export async function importSpendCsv(workspaceId: string, csv: string) {
-  const [head, ...rows] = parseCsv(csv);
+  const [head, ...rows] = parseCsv(csv.replace(/^\uFEFF/, "")); // Excel adds a byte-order mark
   if (!head) throw new Error("The file is empty.");
   const h = head.map((x) => x.trim().toLowerCase());
   const col = (n: string) => h.indexOf(n);
@@ -76,7 +76,8 @@ export async function importSpendCsv(workspaceId: string, csv: string) {
       bad++;
       continue;
     }
-    const platform = (get("platform") || "google").toLowerCase().includes("micro") || get("platform").toLowerCase().includes("bing") ? "microsoft" : (get("platform") || "google").toLowerCase();
+    const rawPlatform = (get("platform") || "google").toLowerCase();
+    const platform = /micro|bing/.test(rawPlatform) ? "microsoft" : /google|adwords/.test(rawPlatform) ? "google" : rawPlatform.replace(/[^a-z0-9]+/g, "_").slice(0, 30);
     const list = byPlatform.get(platform) ?? [];
     list.push({ date: iso, campaign: get("campaign"), campaign_id: get("campaign_id"), cost, clicks: Number(get("clicks")) || 0, impressions: Number(get("impressions")) || 0, geo: get("geo"), adgroup_id: get("adgroup_id") });
     byPlatform.set(platform, list);
