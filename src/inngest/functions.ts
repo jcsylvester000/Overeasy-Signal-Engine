@@ -8,9 +8,14 @@ import { weeklyReports } from "@/server/notify";
 import { deliverOutbound } from "@/server/outbound";
 import type { OseEvents } from "@/server/dispatch";
 
-/** Durable jobs: retries with backoff; concurrency keyed per workspace so one client can't starve others. */
+/**
+ * Durable jobs: retries with backoff; concurrency keyed per workspace so one client can't starve others.
+ * Concurrency is capped by the Inngest plan (free/hobby = 5). Raise INNGEST_MAX_CONCURRENCY on a paid plan.
+ */
+const MAX = Math.max(1, Number(process.env.INNGEST_MAX_CONCURRENCY ?? 5) || 5);
+const cap = (n: number) => Math.min(n, MAX);
 const leadCreated = inngest.createFunction(
-  { id: "lead-created", retries: 5, concurrency: { key: "event.data.workspaceId", limit: 5 }, triggers: [{ event: "ose/lead.created" }] },
+  { id: "lead-created", retries: 5, concurrency: { key: "event.data.workspaceId", limit: cap(5) }, triggers: [{ event: "ose/lead.created" }] },
   async ({ event, step }) => step.run("sync-and-value", () => handlers["ose/lead.created"](event.data as OseEvents["ose/lead.created"])),
 );
 
@@ -25,7 +30,7 @@ const deliver = inngest.createFunction(
 );
 
 const webhook = inngest.createFunction(
-  { id: "process-webhook", retries: 8, concurrency: { limit: 10 }, triggers: [{ event: "ose/webhook.received" }] },
+  { id: "process-webhook", retries: 8, concurrency: { limit: cap(10) }, triggers: [{ event: "ose/webhook.received" }] },
   async ({ event, step }) => step.run("process", () => handlers["ose/webhook.received"](event.data as OseEvents["ose/webhook.received"])),
 );
 
@@ -42,7 +47,7 @@ const health = inngest.createFunction({ id: "health-sweep", triggers: [{ cron: "
 const retention = inngest.createFunction({ id: "retention-sweep", triggers: [{ cron: "30 3 * * *" }] }, async ({ step }) => step.run("purge", () => retentionSweep()));
 
 const outbound = inngest.createFunction(
-  { id: "outbound-webhooks", retries: 2, concurrency: { limit: 2 }, triggers: [{ event: "ose/webhooks.deliver" }] },
+  { id: "outbound-webhooks", retries: 2, concurrency: { limit: cap(2) }, triggers: [{ event: "ose/webhooks.deliver" }] },
   async ({ event, step }) => step.run("deliver", () => handlers["ose/webhooks.deliver"](event.data as OseEvents["ose/webhooks.deliver"])),
 );
 
