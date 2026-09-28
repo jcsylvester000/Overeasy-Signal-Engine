@@ -7,6 +7,7 @@ import { audit } from "@/lib/audit";
 import { sanitizeBrand } from "@/lib/brand";
 import { requireOrg, requireUser, ROLES } from "@/lib/tenancy";
 import { createWorkspace, inviteMember, slugify } from "@/server/provision";
+import { addDomainAliases } from "@/server/domains";
 
 const back = (orgId: string, q = "") => redirect(`/org/${orgId}${q}`);
 
@@ -27,8 +28,9 @@ export async function saveBrand(orgId: string, fd: FormData) {
   const { error } = await admin().from("organizations").update({ brand, custom_domain: domain, tag_domain: tag }).eq("id", org.id);
   if (error) back(orgId, `?error=${encodeURIComponent(error.message)}`);
   await audit({ orgId, actorId: user.id, action: "org.brand.update", entity: "organization", entityId: orgId, diff: { brand, domain, tag } });
+  const dns = domain || tag ? await addDomainAliases([domain, tag]) : null;
   revalidatePath(`/org/${orgId}`);
-  back(orgId, "?saved=brand");
+  back(orgId, dns ? `?saved=brand&note=${encodeURIComponent(dns.message)}` : "?saved=brand");
 }
 
 export async function addWorkspace(orgId: string, fd: FormData) {
@@ -36,6 +38,7 @@ export async function addWorkspace(orgId: string, fd: FormData) {
   await requireOrg(orgId, 4);
   const name = String(fd.get("name") ?? "").trim();
   if (name.length < 2) back(orgId, "?error=Name%20is%20required");
+  if (!fd.get("attest")) back(orgId, "?error=Please%20confirm%20the%20data%20attestation");
   const id = await createWorkspace({
     orgId,
     name,
@@ -45,7 +48,7 @@ export async function addWorkspace(orgId: string, fd: FormData) {
     currency: String(fd.get("currency") ?? "") || undefined,
     actorId: user.id,
   });
-  await audit({ orgId, workspaceId: id, actorId: user.id, action: "workspace.create", entity: "workspace", entityId: id, diff: { name, template: fd.get("template") } });
+  await audit({ orgId, workspaceId: id, actorId: user.id, action: "workspace.create", entity: "workspace", entityId: id, diff: { name, template: fd.get("template"), attestation: "not child-directed; no sensitive data beyond template flags; client discloses ad-platform sharing (v1)" } });
   redirect(`/w/${id}`);
 }
 

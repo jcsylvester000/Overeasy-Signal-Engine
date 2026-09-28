@@ -42,7 +42,7 @@ Organizations form a tree: **platform → partner agency → direct client**. Ea
 ## Local setup
 
 1. Node 22+. `npm install`
-2. Create a Supabase project. In the **SQL editor**, run `supabase/migrations/20260928000000_init.sql`, or use `supabase link` and then `supabase db push`.
+2. Create a Supabase project. In the **SQL editor**, run every file in `supabase/migrations/` **in filename order** (`20260928000000_init.sql`, then `20260929000000_compliance_and_ops.sql`), or use `supabase link` and then `supabase db push`.
 3. Copy `.env.example` to `.env.local` and fill it in. Generate `OSE_ENCRYPTION_KEY` with `openssl rand -base64 32`.
 4. Create the platform owner:
    `npm run bootstrap -- --email you@company.com --password "a-long-password" --org "Overeasy"`
@@ -69,6 +69,22 @@ npm run build       # builds the tag, then Next.js (succeeds with no env vars se
 4. Supabase → **Authentication → URL configuration**: set Site URL to the Netlify URL and add `https://<site>.netlify.app/auth/callback` to the redirect URLs.
 5. Optional: Inngest Cloud → add the app URL `https://<site>.netlify.app/api/inngest` and set `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY` in Netlify. This turns on the retry sweep, health checks and PII purge crons.
 6. Redeploy. Every page is `noindex` (staging).
+
+## Operations features
+
+- **Ad spend** (`/w/…/spend`): daily sync from Google Ads (GAQL) and Microsoft (Reporting API) once connections are live, plus CSV import until then.
+- **Calibration** (`/w/…/calibration`): proposes stage probabilities and spreads from real outcomes. You approve it before anything is published.
+- **Bidding readiness** (`/w/…/readiness`): a checklist plus a playbook for moving bidding to stage values.
+- **Connections**: OAuth connect buttons for Google, Microsoft and GHL appear as soon as each platform's client ID and secret are set. Tokens are stored in Vault. There is also one-click creation of per-stage conversion actions or offline goals (secondary by default).
+- **Privacy** (`/w/…/privacy`):
+  - regulated-vertical mode: click IDs only, no hashed contact data
+  - opt-out policy for GPC signals
+  - data-subject access/export and delete, with a request log
+- **Exports**: leads, signals and spend as CSV. Weekly email summaries go out through Resend under the organization's brand.
+- **Org console**: monthly usage per workspace (the basis for billing), and custom domains added to Netlify automatically when `NETLIFY_AUTH_TOKEN` and `NETLIFY_SITE_ID` are set.
+- **Public trust page** at `/trust`: controls and the sub-processor list, white-labelled.
+- **Integrations** (`integrations/`): a Google Tag Manager custom template and a WordPress plugin.
+- **CI** (`.github/workflows/ci.yml`): lint, typecheck, unit tests, SQL/RLS isolation test and build on every push.
 
 ## Integrating a client website
 

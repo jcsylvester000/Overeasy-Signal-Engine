@@ -5,6 +5,7 @@ import { sendGoogle } from "@/connectors/google/datamanager";
 import { sendMicrosoft } from "@/connectors/microsoft/offline";
 import { markConnection } from "@/connectors/tokens";
 import { ConnectorError, type Connection, type OutboundConversion, type SendResult } from "@/connectors/types";
+import { uploadPolicy, type LeadConsent, type PrivacySettings } from "@/core/privacy";
 import { raiseAlert } from "./alerts";
 import { writeBack } from "./crm";
 
@@ -95,7 +96,7 @@ async function deliverGroup(connectionId: string, stage: string, jobs: Job[]) {
 
   const { data: leads } = await db
     .from("leads")
-    .select("id,attribution,email_sha256,phone_sha256,consent")
+    .select("id,attribution,email_sha256,email_sha256_ms,phone_sha256,consent")
     .in("id", jobs.map((j) => j.lead_id));
   const byId = new Map((leads ?? []).map((l) => [l.id as string, l]));
   const { data: events } = await db
@@ -105,10 +106,12 @@ async function deliverGroup(connectionId: string, stage: string, jobs: Job[]) {
     .eq("canonical_stage", stage);
   const when = new Map((events ?? []).map((e) => [e.lead_id as string, e.occurred_at as string]));
 
+  const { data: wsRow } = await db.from("workspaces").select("settings").eq("id", conn.workspace_id).maybeSingle<{ settings: PrivacySettings }>();
   const conversions: OutboundConversion[] = jobs.map((j) => {
     const l = byId.get(j.lead_id);
     const a = (l?.attribution ?? {}) as Record<string, string | null>;
-    const c = (l?.consent ?? {}) as Record<string, "granted" | "denied" | "unknown">;
+    const c = (l?.consent ?? {}) as LeadConsent;
+    const policy = uploadPolicy(c, wsRow?.settings);
     return {
       jobId: j.id,
       transactionId: j.transaction_id,
@@ -116,9 +119,11 @@ async function deliverGroup(connectionId: string, stage: string, jobs: Job[]) {
       currency: j.currency,
       eventTime: when.get(j.lead_id) ?? new Date().toISOString(),
       clickIds: { gclid: a.gclid, gbraid: a.gbraid, wbraid: a.wbraid, msclkid: a.msclkid },
-      emailSha256: l?.email_sha256 as string | null,
-      phoneSha256: l?.phone_sha256 as string | null,
-      consent: { adUserData: c.ad_user_data ?? "unknown", adPersonalization: c.ad_personalization ?? "unknown" },
+      // Hashed contact data only when policy allows (consent, regulated vertical, opt-out).
+      emailSha256: policy.hashedUserData ? (l?.email_sha256 as string | null) : null,
+      emailSha256Ms: policy.hashedUserData ? (l?.email_sha256_ms as string | null) : null,
+      phoneSha256: policy.hashedUserData ? (l?.phone_sha256 as string | null) : null,
+      consent: { adUserData: c.ad_user_data ?? "unknown", adPersonalization: policy.adPersonalization },
     };
   });
 

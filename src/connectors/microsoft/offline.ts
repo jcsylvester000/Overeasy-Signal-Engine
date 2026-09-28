@@ -25,7 +25,7 @@ export function buildApplyRequest(goalName: string, events: OutboundConversion[]
       ConversionTime: msTime(e.eventTime),
       ConversionValue: e.value,
       ConversionCurrencyCode: e.currency,
-      ...(e.consent.adUserData !== "denied" && e.emailSha256 ? { HashedEmailAddress: e.emailSha256 } : {}),
+      ...(e.consent.adUserData !== "denied" && (e.emailSha256Ms ?? e.emailSha256) ? { HashedEmailAddress: e.emailSha256Ms ?? e.emailSha256 } : {}),
       ...(e.consent.adUserData !== "denied" && e.phoneSha256 ? { HashedPhoneNumber: e.phoneSha256 } : {}),
     })),
   };

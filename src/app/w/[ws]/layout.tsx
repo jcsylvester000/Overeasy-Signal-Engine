@@ -19,11 +19,13 @@ export default async function WorkspaceLayout({ children, params }: { children: 
     { href: base, label: "Overview", group: "Results" },
     { href: `${base}/leads`, label: "Leads", group: "Results" },
     { href: `${base}/signals`, label: "Ad signals", group: "Results" },
+    ...(rank >= 2 ? [{ href: `${base}/spend`, label: "Ad spend", group: "Results" }, { href: `${base}/readiness`, label: "Bidding readiness", group: "Results" }] : []),
     ...(rank >= 3
       ? [
           { href: `${base}/scoring`, label: "① Lead scoring", group: "Configure" },
           { href: `${base}/stages`, label: "② CRM stages", group: "Configure" },
           { href: `${base}/value`, label: "⑤ Value ladder", group: "Configure" },
+          { href: `${base}/calibration`, label: "Calibration", group: "Configure" },
           { href: `${base}/connections`, label: "Connections", group: "Configure" },
           { href: `${base}/sites`, label: "Sites & API", group: "Configure" },
           { href: `${base}/simulator`, label: "Simulator", group: "Configure" },
@@ -31,7 +33,7 @@ export default async function WorkspaceLayout({ children, params }: { children: 
       : []),
     { href: `${base}/health`, label: "Health", group: "Operate" },
     ...(rank >= 3 ? [{ href: `${base}/audit`, label: "Audit log", group: "Operate" }] : []),
-    ...(rank >= 4 ? [{ href: `${base}/settings`, label: "Settings", group: "Operate" }] : []),
+    ...(rank >= 4 ? [{ href: `${base}/privacy`, label: "Privacy", group: "Operate" }, { href: `${base}/settings`, label: "Settings", group: "Operate" }] : []),
   ];
 
   return (

@@ -34,7 +34,7 @@ export async function createWorkspace(args: { orgId: string; name: string; templ
         industry_template: t.id,
         timezone: args.timezone ?? "America/New_York",
         currency: args.currency ?? t.scoring.currency,
-        settings: { storeRawPii: true, piiRetentionDays: 30, stageEntryRules: t.stageEntryRules },
+        settings: { storeRawPii: !t.regulated, piiRetentionDays: 30, stageEntryRules: t.stageEntryRules, regulatedVertical: Boolean(t.regulated), optOutPolicy: "skip_upload" },
         webhook_secret_enc: encrypt(randomToken(32)),
       })
       .select("id")

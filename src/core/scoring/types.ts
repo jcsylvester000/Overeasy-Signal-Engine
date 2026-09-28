@@ -13,6 +13,8 @@ export const FieldDef = z.object({
   type: z.enum(["select", "number", "text"]),
   options: z.array(FieldOption).optional(),
   required: z.boolean().optional(),
+  /** Health, criminal, family or financial-distress data: used for scoring only, never stored raw or sent anywhere. */
+  sensitive: z.boolean().optional(),
 });
 export type FieldDef = z.infer<typeof FieldDef>;
 

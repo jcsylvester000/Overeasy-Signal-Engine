@@ -433,6 +433,7 @@ export async function saveSettings(wsId: string, fd: FormData) {
     piiRetentionDays: retention,
     phoneCountryCode: String(fd.get("phoneCountryCode") ?? "1").replace(/\D/g, "") || "1",
     slackWebhookUrl: /^https:\/\/hooks\.slack\.com\//.test(slack) ? slack : undefined,
+    reportRecipients: String(fd.get("reportRecipients") ?? "").split(/[\s,;]+/).filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)).slice(0, 20).join(", "),
   };
   const patch = { name: String(fd.get("name") ?? ws.name).trim() || ws.name, timezone: String(fd.get("timezone") ?? ws.timezone), currency: String(fd.get("currency") ?? ws.currency).toUpperCase().slice(0, 3), settings };
   const { error } = await db.from("workspaces").update(patch).eq("id", ws.id);

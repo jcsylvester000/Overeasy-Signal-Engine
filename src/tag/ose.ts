@@ -13,6 +13,7 @@ declare global {
   interface Window {
     ose?: OseApi & { q?: unknown[][] };
     dataLayer?: unknown[];
+    oseConfig?: { site?: string };
   }
 }
 type OseApi = {
@@ -25,9 +26,13 @@ type OseApi = {
 
 (function () {
   const VERSION = "1.0.0";
-  const script = (document.currentScript as HTMLScriptElement | null) ?? document.querySelector<HTMLScriptElement>("script[data-site][src*='ose.js']");
+  const script =
+    (document.currentScript as HTMLScriptElement | null) ??
+    document.querySelector<HTMLScriptElement>("script[data-site][src*='ose.js']") ??
+    document.querySelector<HTMLScriptElement>("script[src*='/ose.js']"); // GTM injectScript cannot set data-site
   if (!script || window.ose?.version) return;
-  const SITE = script.getAttribute("data-site") || "";
+  const SITE = script.getAttribute("data-site") || window.oseConfig?.site || new URL(script.src).searchParams.get("site") || "";
+  if (!SITE) return;
   const ENDPOINT = new URL("/v1/collect", script.src).toString();
   const KEY = "_ose";
   const CLICK = ["gclid", "gbraid", "wbraid", "msclkid", "fbclid"];
@@ -65,8 +70,10 @@ type OseApi = {
 
   const store = read();
 
-  function consentFromDataLayer(): Dict {
-    const out: Dict = { ...(store.c || {}) };
+  function consentFromDataLayer(): Record<string, string | boolean> {
+    const out: Record<string, string | boolean> = { ...(store.c || {}) };
+    // Global Privacy Control (universal opt-out signal): honoured server-side per workspace policy.
+    if ((navigator as Navigator & { globalPrivacyControl?: boolean }).globalPrivacyControl === true) out.gpc = true;
     for (const e of window.dataLayer || []) {
       const x = e as unknown[] | { 0?: unknown; 1?: unknown; 2?: Dict };
       const arr = Array.isArray(x) ? x : [x[0], x[1], x[2]];

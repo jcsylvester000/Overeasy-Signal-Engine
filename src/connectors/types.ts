@@ -23,6 +23,8 @@ export type OutboundConversion = {
   eventTime: string; // ISO
   clickIds: { gclid?: string | null; gbraid?: string | null; wbraid?: string | null; msclkid?: string | null };
   emailSha256?: string | null;
+  /** Microsoft-normalised email hash (differs from Google). */
+  emailSha256Ms?: string | null;
   phoneSha256?: string | null;
   consent: { adUserData: "granted" | "denied" | "unknown"; adPersonalization: "granted" | "denied" | "unknown" };
 };

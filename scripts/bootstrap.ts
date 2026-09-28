@@ -31,6 +31,7 @@ if (!url || !key) {
   process.exit(1);
 }
 if (!email || !password || password.length < 12) {
+  if (password && password.length < 12) console.error(`Password too short: ${password.length} characters. Use at least 12.`);
   console.error('Usage: npm run bootstrap -- --email you@company.com --password "at-least-12-chars" [--org "Name"]');
   process.exit(1);
 }

@@ -2,7 +2,8 @@ import "server-only";
 import { z } from "zod";
 import { admin, must } from "@/lib/supabase/admin";
 import { encrypt } from "@/lib/crypto";
-import { hashEmail, hashPhone } from "@/core/hash";
+import { hashEmail, hashEmailMicrosoft, hashPhone } from "@/core/hash";
+import { sanitizeAnswers } from "@/core/privacy";
 import { evaluate } from "@/core/scoring/evaluate";
 import { windowExpiresOn } from "@/core/value/engine";
 import { publishedScoring, publishedValue } from "./models";
@@ -36,6 +37,7 @@ export const Consent = z
   .object({
     ad_user_data: z.enum(["granted", "denied", "unknown"]).optional(),
     ad_personalization: z.enum(["granted", "denied", "unknown"]).optional(),
+    gpc: z.boolean().optional(),
   })
   .partial();
 
@@ -105,14 +107,17 @@ export async function intakeLead(input: IntakeBody & { workspaceId: string; site
 
   // 2. Consent: explicit > visit-recorded > unknown.
   const visitConsent = (last?.consent ?? first?.consent ?? {}) as Record<string, string>;
+  const gpc = input.consent?.gpc === true || (visitConsent as Record<string, unknown>).gpc === true;
   const consent = {
     ad_user_data: input.consent?.ad_user_data ?? visitConsent.ad_user_data ?? "unknown",
-    ad_personalization: input.consent?.ad_personalization ?? visitConsent.ad_personalization ?? "unknown",
+    ad_personalization: gpc ? "denied" : (input.consent?.ad_personalization ?? visitConsent.ad_personalization ?? "unknown"),
+    ...(gpc ? { gpc: true } : {}),
   };
 
   // 3. Hash PII (normalised SHA-256) — hashes are kept for CRM matching and platform uploads.
   const cc = settings.phoneCountryCode ?? (ws.currency === "PHP" ? "63" : "1");
   const emailSha = hashEmail(input.email);
+  const emailShaMs = hashEmailMicrosoft(input.email);
   const phoneSha = hashPhone(input.phone, cc);
 
   // 4. Score with the published model (version recorded on the lead).
@@ -120,6 +125,8 @@ export async function intakeLead(input: IntakeBody & { workspaceId: string; site
   const value = await publishedValue(input.workspaceId);
   const answers = input.answers ?? {};
   const result = scoring ? evaluate(scoring.model, answers) : null;
+  // Capture allowlist: store only answers for fields the workspace defined; sensitive answers are masked after scoring.
+  const stored = scoring ? sanitizeAnswers(scoring.model, answers).kept : {};
   const geo = input.geo ?? (typeof answers.state === "string" ? answers.state : null);
   const expires = value ? windowExpiresOn(value.model, clickTs) : null;
 
@@ -137,9 +144,10 @@ export async function intakeLead(input: IntakeBody & { workspaceId: string; site
         last_touch_visit_id: last?.id ?? null,
         attribution,
         email_sha256: emailSha,
+        email_sha256_ms: emailShaMs,
         phone_sha256: phoneSha,
         geo,
-        answers,
+        answers: stored,
         score: result?.score ?? null,
         score_raw: result?.raw ?? null,
         score_capped: result?.capped ?? false,

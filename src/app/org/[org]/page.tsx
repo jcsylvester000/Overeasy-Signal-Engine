@@ -9,13 +9,14 @@ import { addChildOrg, addWorkspace, invite, removeMember, saveBrand } from "./ac
 
 export const metadata = { title: "Organization" };
 
-export default async function OrgPage({ params, searchParams }: { params: Promise<{ org: string }>; searchParams: Promise<{ saved?: string; error?: string }> }) {
+export default async function OrgPage({ params, searchParams }: { params: Promise<{ org: string }>; searchParams: Promise<{ saved?: string; error?: string; note?: string }> }) {
   const { org: orgId } = await params;
   const sp = await searchParams;
   const user = await requireUser();
   const { org } = await requireOrg(orgId, 4);
   const db = admin();
-  const [{ data: wss }, { data: members }, { data: children }, brand] = await Promise.all([
+  const [{ data: usage }, { data: wss }, { data: members }, { data: children }, brand] = await Promise.all([
+    db.from("usage_monthly").select("*").eq("org_id", orgId).order("month", { ascending: false }).limit(60),
     db.from("workspaces").select("*").eq("org_id", orgId).order("name"),
     db.from("memberships").select("id,user_id,workspace_id,role,created_at").eq("org_id", orgId),
     db.from("organizations").select("*").eq("parent_id", orgId).order("name"),
@@ -38,6 +39,7 @@ export default async function OrgPage({ params, searchParams }: { params: Promis
         <PageHeader title={org.name} description={<>Type: <Badge>{org.type}</Badge> — manage client workspaces, users and white-label branding.</>} />
         {sp.error && <Notice tone="red">{sp.error}</Notice>}
         {sp.saved && <Notice tone="green">Saved.</Notice>}
+        {sp.note && <Notice>{sp.note}</Notice>}
 
         <Card title="Client workspaces">
           <ul className="mb-4 grid gap-2 sm:grid-cols-2">
@@ -77,10 +79,29 @@ export default async function OrgPage({ params, searchParams }: { params: Promis
                 ))}
               </select>
             </Field>
+            <label className="flex items-start gap-2 text-xs sm:col-span-3">
+              <input type="checkbox" name="attest" required className="mt-0.5" />
+              <span>
+                I confirm this client&apos;s forms are not directed at children under 13, will not collect health, criminal or other sensitive data unless the workspace is set as a regulated vertical, and the client&apos;s privacy policy discloses sharing with ad platforms. (Legal intake starts as a regulated vertical.)
+              </span>
+            </label>
             <div className="flex items-end">
               <Button>Create workspace</Button>
             </div>
           </form>
+        </Card>
+
+        <Card title="Usage by month" description="Real (non-simulated) leads per workspace — the metering basis for billing once pricing is set.">
+          <Table head={["Month", "Workspace", "Leads", "Simulated"]} empty="No leads yet.">
+            {(usage ?? []).map((u) => (
+              <tr key={`${u.workspace_id}${u.month}`}>
+                <Td>{String(u.month).slice(0, 7)}</Td>
+                <Td>{workspaces.find((w) => w.id === u.workspace_id)?.name ?? u.workspace_id}</Td>
+                <Td className="num">{u.leads}</Td>
+                <Td className="num">{u.test_leads}</Td>
+              </tr>
+            ))}
+          </Table>
         </Card>
 
         <Card title="Users" description="Organization-level roles apply to every workspace in this organization (and its child organizations).">

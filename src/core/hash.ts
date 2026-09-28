@@ -32,6 +32,22 @@ export function hashEmail(email: string | null | undefined): string | null {
   return n ? sha256Hex(n) : null;
 }
 
+/**
+ * Microsoft Advertising enhanced conversions normalisation: lower-case, trim, and remove "+suffix"
+ * and periods from the local part (per Microsoft's instructions). Google keeps them, so hashes differ.
+ */
+export function normalizeEmailMicrosoft(email: string | null | undefined): string | null {
+  const e = normalizeEmail(email);
+  if (!e) return null;
+  const [local, domain] = e.split("@");
+  return `${local.replace(/\+.*$/, "").replace(/\./g, "")}@${domain}`;
+}
+
+export function hashEmailMicrosoft(email: string | null | undefined): string | null {
+  const n = normalizeEmailMicrosoft(email);
+  return n ? sha256Hex(n) : null;
+}
+
 export function hashPhone(phone: string | null | undefined, defaultCountryCode = "1"): string | null {
   const n = normalizePhone(phone, defaultCountryCode);
   return n ? sha256Hex(n) : null;

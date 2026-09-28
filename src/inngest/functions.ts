@@ -3,6 +3,8 @@ import { inngest } from "./client";
 import { handlers } from "@/server/jobs";
 import { deliverPending } from "@/server/delivery";
 import { healthSweep, retentionSweep } from "@/server/health";
+import { syncSpend } from "@/server/spend";
+import { weeklyReports } from "@/server/notify";
 import type { OseEvents } from "@/server/dispatch";
 
 /** Durable jobs: retries with backoff; concurrency keyed per workspace so one client can't starve others. */
@@ -35,4 +37,8 @@ const health = inngest.createFunction({ id: "health-sweep", triggers: [{ cron: "
 
 const retention = inngest.createFunction({ id: "retention-sweep", triggers: [{ cron: "30 3 * * *" }] }, async ({ step }) => step.run("purge", () => retentionSweep()));
 
-export const functions = [leadCreated, stageRecorded, deliver, webhook, retrySweep, health, retention];
+const spend = inngest.createFunction({ id: "spend-sync", triggers: [{ cron: "15 6 * * *" }] }, async ({ step }) => step.run("sync", () => syncSpend(undefined, 7)));
+
+const weekly = inngest.createFunction({ id: "weekly-report", triggers: [{ cron: "0 13 * * 1" }] }, async ({ step }) => step.run("send", () => weeklyReports()));
+
+export const functions = [leadCreated, stageRecorded, deliver, webhook, retrySweep, health, retention, spend, weekly];

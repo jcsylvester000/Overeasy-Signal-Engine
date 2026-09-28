@@ -10,6 +10,8 @@ export type IndustryTemplate = {
   scoring: ScoringModel;
   value: ValueModel;
   stageEntryRules: Partial<Record<string, string>>;
+  /** Regulated vertical (health, legal, financial distress): hashed contact data is never uploaded. */
+  regulated?: boolean;
 };
 
 /** Industry templates (SCR-05). A template is cloned into a workspace and then owned by that workspace. */
@@ -42,6 +44,7 @@ export const TEMPLATES: IndustryTemplate[] = [
     description: "Case intake for law firms (contingency or retainer).",
     scoring: legalScoring,
     value: legalValue,
+    regulated: true,
     stageEntryRules: { qualified: "Passed intake screen.", opportunity: "Consultation held.", contract: "Engagement signed.", funded: "Fee collected." },
   },
   {

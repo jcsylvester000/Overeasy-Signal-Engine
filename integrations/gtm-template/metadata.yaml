@@ -1,0 +1,7 @@
+homepage: "https://github.com/YOUR-ORG/signal-engine-gtm-template"
+documentation: "https://github.com/YOUR-ORG/signal-engine-gtm-template#readme"
+versions:
+  # Latest version first. Replace sha with the full commit SHA that contains
+  # the template.tpl you want to publish.
+  - sha: 0000000000000000000000000000000000000000
+    changeNotes: Initial release.

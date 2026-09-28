@@ -5,6 +5,7 @@ import { rungIndex, type Rung } from "@/core/stages";
 import { cumulativeValue, planSignals, type SignalDecision } from "@/core/value/engine";
 import type { Platform } from "@/core/value/types";
 import type { Connection } from "@/connectors/types";
+import { uploadPolicy, type LeadConsent, type PrivacySettings } from "@/core/privacy";
 import { publishedScoring, publishedValue } from "./models";
 import { dispatch } from "./dispatch";
 
@@ -21,6 +22,7 @@ type LeadRow = {
   phone_sha256: string | null;
   click_ts: string | null;
   currency: string;
+  consent: LeadConsent | null;
 };
 
 /**
@@ -55,6 +57,9 @@ export async function planAndEnqueue(workspaceId: string, leadId: string): Promi
   const connections = (conns ?? []) as Connection[];
   if (!connections.length) return [];
 
+  const { data: wsRow } = await db.from("workspaces").select("settings").eq("id", workspaceId).maybeSingle<{ settings: PrivacySettings }>();
+  const policy = uploadPolicy(lead.consent, wsRow?.settings);
+
   const { data: prior } = await db.from("signal_jobs").select("connection_id,mode,value_increment,status").eq("lead_id", leadId);
   const decisions: SignalDecision[] = [];
 
@@ -72,11 +77,15 @@ export async function planAndEnqueue(workspaceId: string, leadId: string): Promi
       scoreMax,
       actualValue,
       clickIds: lead.attribution ?? {},
-      hasHashedUserData: Boolean(lead.email_sha256 || lead.phone_sha256),
+      hasHashedUserData: policy.hashedUserData && Boolean(lead.email_sha256 || lead.phone_sha256),
       clickTs: lead.click_ts ? new Date(lead.click_ts) : null,
       now: new Date(),
       platforms: [{ platform, sent: Math.round(sent * 100) / 100 }],
     });
+    if (!policy.upload && d.status === "enqueue") {
+      d.status = "skipped";
+      d.reason = policy.reason;
+    }
     decisions.push(d);
 
     // "Nothing new to send" is not recorded; everything else leaves an audit row.

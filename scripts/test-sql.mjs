@@ -85,5 +85,12 @@ const sid = (await db.query(`select ose_vault_put('conn:test', '{"t":1}') as id`
 check("vault round-trip", (await db.query(`select ose_vault_get($1) as s`, [sid])).rows[0].s === '{"t":1}');
 check("authenticated cannot call vault", await as(A, `select ose_vault_get('${sid}')`).then(() => false, () => true));
 
-console.log(failures ? `\n${failures} check(s) failed` : "\nAll SQL checks passed");
+// Usage view respects RLS (security_invoker) and DSAR log is admin-only
+check("usage view: A sees only A1 usage", (await as(A, "select workspace_id from usage_monthly")).every((r) => r.workspace_id === "20000000-0000-0000-0000-000000000001"));
+check("usage view: B sees only B1 usage", (await as(B, "select workspace_id from usage_monthly")).every((r) => r.workspace_id === "20000000-0000-0000-0000-000000000002"));
+await db.exec(`insert into dsar_requests (workspace_id, kind, subject_hash) values ('20000000-0000-0000-0000-000000000002','access','h')`);
+check("DSAR log hidden from analysts", (await as(B, "select * from dsar_requests")).length === 0);
+check("DSAR log hidden from other tenants", (await as(A, "select * from dsar_requests")).length === 0);
+
+console.log(failures ?`\n${failures} check(s) failed` : "\nAll SQL checks passed");
 process.exit(failures ? 1 : 0);

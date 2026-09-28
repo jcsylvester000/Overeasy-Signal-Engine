@@ -57,7 +57,7 @@ export const legalScoring: ScoringModel = {
   fields: [
     { key: "case_type", label: "Case type", type: "select", options: opts([["personal_injury", "Personal injury"], ["employment", "Employment"], ["family", "Family"], ["other", "Other"]]) },
     { key: "months_since_incident", label: "Months since incident", type: "number" },
-    { key: "injury_treated", label: "Received medical treatment", type: "select", options: opts([["yes", "Yes"], ["no", "No"]]) },
+    { key: "injury_treated", label: "Received medical treatment", type: "select", sensitive: true, options: opts([["yes", "Yes"], ["no", "No"]]) },
     { key: "has_lawyer", label: "Already represented", type: "select", options: opts([["yes", "Yes"], ["no", "No"]]) },
     { key: "state", label: "State", type: "text", required: true },
   ],

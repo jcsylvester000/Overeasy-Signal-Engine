@@ -26,7 +26,20 @@ export default async function Leads({ params, searchParams }: { params: Promise<
 
   return (
     <>
-      <PageHeader title="Leads" description="Every lead, its score, where it came from and how far it has moved. Contact details are never shown here." />
+      <PageHeader
+        title="Leads"
+        description="Every lead, its score, where it came from and how far it has moved. Contact details are never shown here."
+        actions={
+          <>
+            <a className="rounded-md border border-line bg-white px-3 py-1.5 text-sm hover:bg-gray-50" href={`/w/${ws.id}/export/leads.csv?days=365`}>
+              Export leads CSV
+            </a>
+            <a className="rounded-md border border-line bg-white px-3 py-1.5 text-sm hover:bg-gray-50" href={`/w/${ws.id}/export/signals.csv?days=365`}>
+              Export signals CSV
+            </a>
+          </>
+        }
+      />
       <div className="mb-3 flex flex-wrap gap-1 text-sm">
         <Link href={link({ stage: undefined, page: undefined })} className={`rounded px-2 py-1 ${!sp.stage ? "bg-brand text-white" : "hover:bg-gray-100"}`}>
           All

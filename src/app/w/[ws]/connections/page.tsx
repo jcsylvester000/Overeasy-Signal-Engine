@@ -4,6 +4,8 @@ import { env } from "@/lib/env";
 import { RUNGS, STAGE_LABEL } from "@/core/stages";
 import { Badge, Button, Card, Field, Notice, PageHeader, Status, when } from "@/components/ui";
 import { addConnection, reconnect, removeConnection, runGhlInstall, saveConnection, saveDestinations } from "../actions";
+import { createActions } from "../ops-actions";
+import { oauthEnabled, type OAuthProvider } from "@/connectors/oauth";
 
 export const metadata = { title: "Connections" };
 
@@ -42,7 +44,7 @@ export default async function Connections({ params, searchParams }: { params: Pr
       <div className="space-y-6">
         {(conns ?? []).map((c) => {
           const p = PROVIDERS[c.provider] ?? { name: c.provider, account: "Account", approval: "", oauthEnv: "" };
-          const oauthReady = Boolean(process.env[p.oauthEnv]);
+          const oauthReady = oauthEnabled(c.provider as OAuthProvider);
           const d = (dests ?? []).filter((x) => x.connection_id === c.id);
           return (
             <Card
@@ -95,8 +97,27 @@ export default async function Connections({ params, searchParams }: { params: Pr
               </form>
               <div className="mt-3 rounded-md bg-gray-50 p-3 text-xs text-muted">
                 <strong className="text-ink">Sign-in (OAuth):</strong>{" "}
-                {oauthReady ? "App credentials present — the connect flow will be enabled once approval completes." : <>Awaiting approval: {p.approval}. Tokens will be stored in Supabase Vault, never in plain tables.</>}
+                {oauthReady ? (
+                  <>
+                    {c.token_secret_id ? "Signed in; tokens are in the encrypted vault. " : "Not signed in yet. "}
+                    {canEdit && (
+                      <a className="font-medium text-brand hover:underline" href={`/api/oauth/${c.provider}/start?ws=${ws.id}&conn=${c.id}`}>
+                        {c.token_secret_id ? "Reconnect" : `Connect ${p.name}`} →
+                      </a>
+                    )}
+                  </>
+                ) : (
+                  <>Awaiting approval: {p.approval}. Tokens will be stored in Supabase Vault, never in plain tables.</>
+                )}
               </div>
+              {(c.provider === "google_ads" || c.provider === "microsoft_ads") && canEdit && (
+                <form action={createActions.bind(null, ws.id, c.id)} className="mt-3 flex flex-wrap items-end gap-2">
+                  <Field label="Name prefix for stage conversion actions">
+                    <input name="prefix" defaultValue={ws.name} className="w-64" />
+                  </Field>
+                  <Button variant="secondary">Create one per stage (secondary)</Button>
+                </form>
+              )}
 
               {c.provider === "ghl" && canEdit && (
                 <form action={runGhlInstall.bind(null, ws.id, c.id)} className="mt-3">
