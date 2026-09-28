@@ -22,11 +22,19 @@ export type Workspace = {
 
 export type Org = { id: string; parent_id: string | null; type: "platform" | "partner" | "direct"; name: string; slug: string; brand: Record<string, unknown>; custom_domain: string | null; tag_domain: string | null };
 
-export const currentUser = cache(async () => {
+export type SessionUser = { id: string; email: string | null };
+
+/**
+ * Signed-in user from the session JWT. getClaims() verifies the token locally against the project's published
+ * signing keys (cached), so no Auth-server round trip on every page (falls back to a server check for legacy keys).
+ */
+export const currentUser = cache(async (): Promise<SessionUser | null> => {
   if (!env.isConfigured()) redirect("/app");
   const sb = await userClient();
-  const { data } = await sb.auth.getUser();
-  return data.user ?? null;
+  const { data, error } = await sb.auth.getClaims();
+  const sub = data?.claims?.sub;
+  if (error || !sub) return null;
+  return { id: String(sub), email: typeof data.claims.email === "string" ? data.claims.email : null };
 });
 
 export async function requireUser() {
@@ -35,16 +43,30 @@ export async function requireUser() {
   return user;
 }
 
-/** Workspace the user can access (RLS-checked) + their effective rank. */
+export type OrgWithSettings = Org & { settings?: Record<string, unknown> | null };
+
+/**
+ * Workspace the user can access + their effective rank + the organization chain (brand, MFA policy).
+ * One database round trip via ose_workspace_context(); falls back to separate queries if that function is missing.
+ */
 export const workspaceAccess = cache(async (workspaceId: string) => {
   await requireUser();
   if (!/^[0-9a-f-]{36}$/i.test(workspaceId)) notFound();
   const sb = await userClient();
+  const ctx = await sb.rpc("ose_workspace_context", { ws: workspaceId });
+  if (!ctx.error) {
+    const c = ctx.data as { rank: number; workspace: Workspace; orgs: OrgWithSettings[] } | null;
+    if (!c) notFound();
+    const org = c.orgs.find((o) => o.id === c.workspace.org_id)!;
+    return { ws: c.workspace, org, rank: Number(c.rank), chain: c.orgs };
+  }
   const { data: ws } = await sb.from("workspaces").select("*").eq("id", workspaceId).maybeSingle<Workspace>();
   if (!ws) notFound();
-  const { data: rank } = await sb.rpc("ose_workspace_rank", { ws: workspaceId });
-  const { data: org } = await sb.from("organizations").select("*").eq("id", ws.org_id).maybeSingle<Org>();
-  return { ws, org: org!, rank: Number(rank ?? 0) };
+  const [{ data: rank }, { data: org }] = await Promise.all([
+    sb.rpc("ose_workspace_rank", { ws: workspaceId }),
+    sb.from("organizations").select("*").eq("id", ws.org_id).maybeSingle<OrgWithSettings>(),
+  ]);
+  return { ws, org: org!, rank: Number(rank ?? 0), chain: null as OrgWithSettings[] | null };
 });
 
 export async function requireWorkspace(workspaceId: string, minRank = 1) {
@@ -73,12 +95,16 @@ export async function requireOrg(orgId: string, minRank = 4) {
  * MFA policy: when an organization (or any ancestor) requires it, admins and owners must be at AAL2.
  * Users without an authenticator are sent to set one up; users with one are sent to the code check.
  */
-export async function enforceMfa(orgId: string, rank: number, next: string) {
+export async function enforceMfa(orgId: string, rank: number, next: string, chain?: OrgWithSettings[] | null) {
   if (rank < 4) return;
+  let required = false;
+  let id: string | null = orgId;
+  if (chain) {
+    required = chain.some((o) => Boolean((o.settings as { requireMfaForAdmins?: boolean } | null)?.requireMfaForAdmins));
+    id = null;
+  }
   const { admin } = await import("@/lib/supabase/admin");
   const db = admin();
-  let id: string | null = orgId;
-  let required = false;
   for (let i = 0; id && i < 5 && !required; i++) {
     const res: { data: { parent_id: string | null; settings: { requireMfaForAdmins?: boolean } | null } | null } = await db.from("organizations").select("parent_id,settings").eq("id", id).maybeSingle();
     required = Boolean(res.data?.settings?.requireMfaForAdmins);

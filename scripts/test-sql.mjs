@@ -92,5 +92,10 @@ await db.exec(`insert into dsar_requests (workspace_id, kind, subject_hash) valu
 check("DSAR log hidden from analysts", (await as(B, "select * from dsar_requests")).length === 0);
 check("DSAR log hidden from other tenants", (await as(A, "select * from dsar_requests")).length === 0);
 
-console.log(failures ?`\n${failures} check(s) failed` : "\nAll SQL checks passed");
+// One-call workspace context respects access
+const ctxA = (await as(A, "select ose_workspace_context('20000000-0000-0000-0000-000000000001') as c"))[0].c;
+check("context: A gets own workspace with rank and org chain", Boolean(ctxA) && ctxA.rank === 4 && ctxA.orgs.length === 2 && !("webhook_secret_enc" in ctxA.workspace));
+check("context: A gets null for B's workspace", (await as(A, "select ose_workspace_context('20000000-0000-0000-0000-000000000002') as c"))[0].c === null);
+
+console.log(failures ? `\n${failures} check(s) failed` : "\nAll SQL checks passed");
 process.exit(failures ? 1 : 0);

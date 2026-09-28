@@ -100,6 +100,17 @@ npm run build       # builds the tag, then Next.js (succeeds with no env vars se
 - **Client health** table on the organization page, **error pages**, and public **developer docs** at `/docs`.
 - Migration `20260930000000_webhooks_and_security.sql` must be run in Supabase.
 
+## v0.5 additions
+
+- **CRM workflow webhook** (Connections page): `POST /v1/webhooks/workflow/{workspaceId}` with an `X-OSE-Token` header. It works with GoHighLevel workflow "Custom Webhook" actions and needs no Marketplace approval. Contacts not seen by the tag become CRM-only leads.
+- **Offline conversion upload files** (Ad signals page): Google Ads and Microsoft Advertising CSVs of stage-value increments that haven't been uploaded yet, with "mark as exported" to track them. Use these until API access is approved.
+- **Speed:**
+  - Sessions are verified locally with `getClaims()`, so there's no Auth-server round trip per page.
+  - Workspace, org chain and role load in one database call (`ose_workspace_context`).
+  - Pages show instant loading skeletons, and links prefetch.
+  - Set the Netlify **Functions region** to the same region as the Supabase project.
+- Migration `20261001000000_speed_and_workflows.sql` must be run in Supabase.
+
 ## Integrating a client website
 
 The paths are the tag (any CMS: WordPress, Webflow, Wix, Squarespace, Shopify, GHL funnels, custom), the server Ingest API (`POST /v1/leads`, signed, idempotent), or CRM-only. **Sites & API** in each workspace shows the exact snippet, keys and a live event debugger. The tag never reads password, card or ID fields, skips login forms, and strips query strings from stored URLs.

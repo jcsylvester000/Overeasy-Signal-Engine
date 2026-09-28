@@ -73,6 +73,7 @@ export async function processInbox(inboxId: string) {
     let workspaceId = row.workspace_id as string | null;
     if (row.provider === "ghl") workspaceId = await processGhl(row.payload as GhlPayload);
     else if (row.provider === "generic" && workspaceId) await processGeneric(workspaceId, row.payload as GenericPayload);
+    else if (row.provider === "workflow" && workspaceId) await processWorkflow(workspaceId, row.payload as Record<string, unknown>);
     await db.from("webhook_inbox").update({ processed_at: new Date().toISOString(), error: null, workspace_id: workspaceId }).eq("id", inboxId);
   } catch (e) {
     await db.from("webhook_inbox").update({ error: String(e).slice(0, 500) }).eq("id", inboxId);
@@ -161,4 +162,74 @@ async function processGeneric(workspaceId: string, p: GenericPayload) {
   }
   if (!stage) return;
   await recordStage({ workspaceId, leadId, stage, source: "generic", occurredAt: p.occurred_at ?? null, actualValue: p.actual_value ?? null, lostReason: p.lost_reason ?? null, crmStageId: p.stage_id ?? null });
+}
+
+// ------------------------------------------------------------------ CRM workflow webhooks (e.g. GHL workflow action)
+const CLICK_KEYS = ["gclid", "gbraid", "wbraid", "msclkid", "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"] as const;
+
+/** Flatten GHL's workflow payload (top-level contact fields, nested objects, customData) into one lookup. */
+export function flattenWorkflowPayload(p: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  const put = (k: string, v: unknown) => {
+    if (v === null || v === undefined || typeof v === "object") return;
+    const key = k.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+    if (!(key in out) && String(v).trim() !== "") out[key] = String(v).trim();
+  };
+  const custom = (p.customData ?? p.custom_data ?? {}) as Record<string, unknown>;
+  for (const [k, v] of Object.entries(custom)) put(k, v); // explicit custom data wins
+  for (const [k, v] of Object.entries(p)) put(k, v);
+  for (const nested of ["opportunity", "contact", "attributionSource", "attribution_source", "lastAttributionSource", "contact_attribution"]) {
+    const o = p[nested];
+    if (o && typeof o === "object") {
+      for (const [k, v] of Object.entries(o as Record<string, unknown>)) {
+        put(`${nested}_${k}`, v);
+        put(k, v);
+      }
+    }
+  }
+  return out;
+}
+
+export function workflowFields(f: Record<string, string>) {
+  const pick = (...keys: string[]) => keys.map((k) => f[k]).find((v) => v !== undefined);
+  return {
+    stage: pick("stage", "pipeline_stage", "pipleline_stage", "pipeline_stage_name", "opportunity_pipeline_stage", "stage_name"),
+    pipeline: pick("pipeline", "pipeline_name", "pipeline_id", "opportunity_pipeline_name", "opportunity_pipeline_id") ?? "default",
+    status: pick("status", "opportunity_status")?.toLowerCase(),
+    contactId: pick("contact_id", "contact_contact_id", "id"),
+    opportunityId: pick("opportunity_id", "opportunity_opportunity_id"),
+    email: pick("email", "contact_email"),
+    phone: pick("phone", "contact_phone"),
+    name: pick("full_name", "name", "contact_name"),
+    value: pick("value", "actual_value", "lead_value", "monetary_value", "opportunity_value", "opportunity_monetary_value"),
+    lostReason: pick("lost_reason", "opportunity_lost_reason_id"),
+    leadId: pick("ose_lead_id", "lead_id"),
+    attribution: Object.fromEntries(CLICK_KEYS.map((k) => [k, f[k]]).filter(([, v]) => v)) as Record<string, string>,
+  };
+}
+
+async function processWorkflow(workspaceId: string, payload: Record<string, unknown>) {
+  const w = workflowFields(flattenWorkflowPayload(payload));
+  let leadId = await findLead(workspaceId, "ghl", { leadId: w.leadId, opportunityId: w.opportunityId, contactId: w.contactId, email: w.email, phone: w.phone });
+  if (!leadId && (w.email || w.phone)) {
+    // CRM-only lead (e.g. a GHL form without the website tag): create it so its journey is tracked.
+    const { intakeLead } = await import("./intake");
+    const r = await intakeLead({ workspaceId, source: "crm", form: "crm-workflow", email: w.email ?? null, phone: w.phone ?? null, name: w.name ?? null, answers: {}, attribution: w.attribution, external_ref: w.contactId ?? null });
+    leadId = r.lead_id;
+  }
+  if (!leadId) {
+    await raiseAlert(workspaceId, { type: "unlinked_opportunity", severity: "info", title: "CRM workflow event had no email, phone or known contact", dedupeKey: `wf-unlinked:${w.contactId ?? "none"}` });
+    return;
+  }
+  if (w.contactId) await link(workspaceId, "ghl", leadId, w.contactId, w.opportunityId);
+  let stage: string | null = null;
+  if (w.status === "lost" || w.status === "abandoned") stage = "lost";
+  else if (w.stage && isCanonicalStage(w.stage.toLowerCase())) stage = w.stage.toLowerCase();
+  else if (w.stage) {
+    const mapped = await mapCrmStage(workspaceId, "ghl_workflow", w.pipeline, w.stage.toLowerCase(), w.stage);
+    stage = mapped === "ignore" ? null : mapped;
+  }
+  if (!stage) return;
+  const value = w.value ? Number(String(w.value).replace(/[$,]/g, "")) : null;
+  await recordStage({ workspaceId, leadId, stage, source: "ghl", actualValue: stage === "funded" && value && Number.isFinite(value) ? value : null, lostReason: stage === "lost" ? (w.lostReason ?? "lost in CRM") : null });
 }

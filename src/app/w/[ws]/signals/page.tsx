@@ -24,6 +24,9 @@ export default async function Signals({ params, searchParams }: { params: Promis
     sb.from("stage_events").select("canonical_stage").eq("workspace_id", ws.id).gte("occurred_at", since).neq("canonical_stage", "lost"),
     sb.from("signal_jobs").select("canonical_stage,status").eq("workspace_id", ws.id).gte("created_at", since),
   ]);
+  const countPending = (pl: string) => sb.from("signal_jobs").select("id", { count: "exact", head: true }).eq("workspace_id", ws.id).eq("platform", pl).eq("status", "dry_run").gt("value_increment", 0).is("exported_at", null);
+  const [gc, mc] = rank >= 3 ? await Promise.all([countPending("google"), countPending("microsoft")]) : [{ count: 0 }, { count: 0 }];
+  const pendingExport = { google: gc.count ?? 0, microsoft: mc.count ?? 0 };
   const stages = ["submitted", "qualified", "opportunity", "contract", "sold", "funded"];
   const recon = stages.map((s) => ({
     s,
@@ -60,6 +63,40 @@ export default async function Signals({ params, searchParams }: { params: Promis
           ))}
         </Table>
       </Card>
+      {rank >= 3 && (
+        <Card
+          title="Upload files for Google Ads and Microsoft Advertising (before API approval)"
+          description="Download the stage values not yet uploaded, in each platform's offline-conversion format, and upload them in the ad account. Do this weekly. Once the API connection is live, uploads are automatic and these files are no longer needed."
+          className="mb-6"
+        >
+          <div className="grid gap-4 md:grid-cols-2">
+            {(["google", "microsoft"] as const).map((pl) => (
+              <form key={pl} method="post" action={`/w/${ws.id}/offline/${pl}`} className="space-y-2 rounded-md border border-line p-3 text-sm">
+                <div className="font-medium">{pl === "google" ? "Google Ads" : "Microsoft Advertising"}</div>
+                <p className="text-xs text-muted">
+                  {pendingExport[pl]} value update(s) waiting. {pl === "google" ? "Google Ads → Goals → Conversions → Uploads." : "Microsoft Advertising → Conversions → Offline conversions → Upload."}
+                </p>
+                <label className="flex flex-col gap-1 text-xs">
+                  Conversion name prefix (must match the actions you created)
+                  <input name="prefix" defaultValue={ws.name} />
+                </label>
+                <label className="flex items-center gap-2 text-xs">
+                  <input type="checkbox" name="mark" defaultChecked /> Mark as exported (next file only has new rows)
+                </label>
+                <label className="flex items-center gap-2 text-xs">
+                  <input type="checkbox" name="include_exported" /> Include rows already exported
+                </label>
+                <input type="hidden" name="days" value="90" />
+                <Button variant="secondary">Download {pl === "google" ? "Google" : "Microsoft"} file</Button>
+              </form>
+            ))}
+          </div>
+          <p className="mt-3 text-xs text-muted">
+            Create one offline conversion per stage in each ad account, named <code>{ws.name} – Lead submitted</code>, <code>– Qualified</code>, <code>– Opportunity</code>, <code>– Contract</code>, <code>– Deal funded</code> (secondary to start). Each row carries only the increase in value, so totals never double count. Clicks older than 90 days are left out. Before the first upload, compare the column headers with the platform&apos;s current template.
+          </p>
+        </Card>
+      )}
+
       <div className="mb-3 flex flex-wrap gap-1 text-sm">
         {FILTERS.map((f) => (
           <Link key={f} href={`?status=${f}`} className={`rounded px-2 py-1 ${(sp.status ?? "all") === f ? "bg-brand text-white" : "hover:bg-gray-100"}`}>

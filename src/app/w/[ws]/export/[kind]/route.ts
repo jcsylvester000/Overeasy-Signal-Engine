@@ -81,8 +81,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ ws: string; kin
   } else {
     return new Response("Not found", { status: 404 });
   }
-  const { data: u } = await sb.auth.getUser();
-  await audit({ orgId: ws.org_id, workspaceId: ws.id, actorId: u.user?.id, action: "export.csv", entity: kind, diff: { days } });
+  const { data: u } = await sb.auth.getClaims();
+  await audit({ orgId: ws.org_id, workspaceId: ws.id, actorId: u?.claims?.sub ? String(u.claims.sub) : null, action: "export.csv", entity: kind, diff: { days } });
   return new Response(csv, {
     headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="${ws.slug}-${kind.replace(".csv", "")}-${new Date().toISOString().slice(0, 10)}.csv"`, "cache-control": "no-store" },
   });

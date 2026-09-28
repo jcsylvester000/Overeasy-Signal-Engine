@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { brandCssVars, brandForOrg } from "@/lib/brand";
+import { brandCssVars, brandForOrg, brandFromChain } from "@/lib/brand";
 import { env } from "@/lib/env";
 import { enforceMfa, requireUser, requireWorkspace, ROLE_LABEL, type Role } from "@/lib/tenancy";
 import { TopBar } from "@/components/topbar";
@@ -10,9 +10,8 @@ import { deleteDemo } from "@/app/app/actions";
 export default async function WorkspaceLayout({ children, params }: { children: React.ReactNode; params: Promise<{ ws: string }> }) {
   const { ws: wsId } = await params;
   const user = await requireUser();
-  const { ws, org, rank } = await requireWorkspace(wsId);
-  await enforceMfa(org.id, rank, `/w/${ws.id}`);
-  const brand = await brandForOrg(org.id);
+  const { ws, org, rank, chain } = await requireWorkspace(wsId);
+  const [, brand] = await Promise.all([enforceMfa(org.id, rank, `/w/${ws.id}`, chain), chain ? brandFromChain(chain, org.id) : brandForOrg(org.id)]);
   const base = `/w/${ws.id}`;
   const roleName = (Object.entries({ owner: 5, admin: 4, manager: 3, analyst: 2, client_viewer: 1 }).find(([, r]) => r === rank)?.[0] ?? "client_viewer") as Role;
   const mode = env.connectorMode();

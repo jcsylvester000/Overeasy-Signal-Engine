@@ -11,7 +11,7 @@ import { calibrationFor, createConversionActions, dsarDelete, dsarExport } from 
 import { importSpendCsv, syncSpend } from "@/server/spend";
 import { weeklyReports } from "@/server/notify";
 import { publishedScoring } from "@/server/models";
-import { encrypt, randomToken } from "@/lib/crypto";
+import { encrypt, randomToken, sha256 } from "@/lib/crypto";
 import { deliverOutbound, emitEvent, OUTBOUND_EVENTS } from "@/server/outbound";
 import { importHistory } from "@/server/backfill";
 import { importGhlPipelines } from "@/server/ops";
@@ -193,4 +193,15 @@ export async function fetchPipelines(wsId: string, connId: string) {
     go(wsId, "/stages", { error: e instanceof Error ? e.message : "Could not load pipelines" });
   }
   go(wsId, "/stages", { saved: msg });
+}
+
+// ---------------------------------------------------------------- CRM workflow webhook token
+export async function rotateInboundToken(wsId: string, _prev: WebhookState): Promise<WebhookState> {
+  void _prev;
+  const { user, ws, db } = await ctx(wsId, 4);
+  const token = `osewf_${randomToken(30)}`;
+  const { error } = await db.from("workspaces").update({ inbound_token_hash: sha256(token) }).eq("id", ws.id);
+  if (error) return { error: error.message.includes("inbound_token_hash") ? "Run the latest database update (migration 20261001) first." : error.message };
+  await audit({ orgId: ws.org_id, workspaceId: ws.id, actorId: user.id, action: "workflow_token.rotate", entity: "workspace", entityId: ws.id });
+  return { secret: token };
 }

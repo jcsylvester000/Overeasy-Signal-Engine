@@ -63,6 +63,17 @@ export const brandForOrg = cache(async (orgId: string | null | undefined): Promi
   }
 });
 
+/** Brand from an already-loaded organization chain (no queries). */
+export function brandFromChain(chain: { id: string; parent_id: string | null; type: string; brand: unknown }[], orgId: string): Brand {
+  const ordered: typeof chain = [];
+  let cur = chain.find((o) => o.id === orgId);
+  for (let i = 0; cur && i < 6; i++) {
+    ordered.unshift(cur);
+    cur = chain.find((o) => o.id === cur!.parent_id);
+  }
+  return ordered.filter((o) => o.type !== "platform").reduce<Brand>((acc, o) => ({ ...acc, ...sanitizeBrand(o.brand as Partial<Brand>) }), base());
+}
+
 /** Brand resolved from the request host (partner custom domain), used before sign-in. */
 export const brandForHost = cache(async (): Promise<{ brand: Brand; orgId: string | null }> => {
   const h = await headers();

@@ -1,10 +1,13 @@
+import { headers } from "next/headers";
+import { admin } from "@/lib/supabase/admin";
+import { SecretForm } from "@/components/secret-form";
 import { requireWorkspace } from "@/lib/tenancy";
 import { userClient } from "@/lib/supabase/server";
 import { env } from "@/lib/env";
 import { RUNGS, STAGE_LABEL } from "@/core/stages";
 import { Badge, Button, Card, Field, Notice, PageHeader, Status, when } from "@/components/ui";
 import { addConnection, reconnect, removeConnection, runGhlInstall, saveConnection, saveDestinations } from "../actions";
-import { createActions } from "../ops-actions";
+import { createActions, rotateInboundToken } from "../ops-actions";
 import { oauthEnabled, type OAuthProvider } from "@/connectors/oauth";
 
 export const metadata = { title: "Connections" };
@@ -25,6 +28,10 @@ export default async function Connections({ params, searchParams }: { params: Pr
     sb.from("conversion_destinations").select("*").eq("workspace_id", ws.id),
   ]);
   const ceiling = env.connectorMode();
+  const { data: tokenRow } = await admin().from("workspaces").select("inbound_token_hash").eq("id", ws.id).maybeSingle();
+  const hasToken = Boolean((tokenRow as { inbound_token_hash?: string | null } | null)?.inbound_token_hash);
+  const h = await headers();
+  const appOrigin = `${h.get("x-forwarded-proto") ?? "https"}://${h.get("x-forwarded-host") ?? h.get("host")}`;
   const canEdit = rank >= 4;
 
   return (
@@ -40,6 +47,38 @@ export default async function Connections({ params, searchParams }: { params: Pr
         {sp.saved && <Notice tone="green">{sp.saved}</Notice>}
         {sp.error && <Notice tone="red">{sp.error}</Notice>}
       </div>
+
+      <Card
+        title="CRM workflow webhook — works today, no app approval needed"
+        description="Connect GoHighLevel (or any CRM with workflow webhooks) using a workflow action and a secret header. Stage changes start flowing immediately; the Marketplace app replaces this later."
+        className="mb-6"
+      >
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="space-y-2 text-sm">
+            <div className="text-xs font-medium">Webhook URL</div>
+            <code className="block break-all rounded bg-gray-50 p-2 text-xs">{`${appOrigin}/v1/webhooks/workflow/${ws.id}`}</code>
+            <div className="text-xs font-medium">Header</div>
+            <code className="block rounded bg-gray-50 p-2 text-xs">X-OSE-Token: &lt;your token&gt;</code>
+            {canEdit && (
+              <SecretForm action={rotateInboundToken.bind(null, ws.id)} button={hasToken ? "Generate a new token" : "Generate token"} note="Copy this token into the workflow header now. It will not be shown again; generating a new one disables the old one." />
+            )}
+            {hasToken && <p className="text-xs text-green-800">A token is active.</p>}
+          </div>
+          <div className="text-sm">
+            <div className="mb-1 text-xs font-medium">Set it up in GoHighLevel (about 10 minutes)</div>
+            <ol className="list-decimal space-y-1 pl-5 text-xs text-muted">
+              <li>Automation → Workflows → <strong>Create workflow</strong>. Trigger: <strong>Pipeline Stage Changed</strong>, filtered to the pipeline and the stage (e.g. &quot;Qualified Seller&quot;).</li>
+              <li>Add action <strong>Custom Webhook</strong>: method POST, the URL above, header <code>X-OSE-Token</code> with your token, and include contact data.</li>
+              <li>
+                Under custom data add <code>stage</code> = <code>qualified</code> (use one workflow per stage: <code>qualified</code>, <code>opportunity</code>, <code>contract</code>, <code>sold</code>, <code>funded</code>). For the funded workflow also add <code>value</code> = the opportunity value from the variable picker.
+              </li>
+              <li>For lost deals: trigger <strong>Opportunity Status Changed</strong> → Lost, custom data <code>stage</code> = <code>lost</code>.</li>
+              <li>Publish, move a test opportunity, and check <strong>Health → Incoming CRM webhooks</strong>.</li>
+            </ol>
+            <p className="mt-2 text-xs text-muted">Alternative: send the CRM&apos;s own stage name instead of a fixed value; new stage names appear on <strong>CRM stages</strong> for you to map. Leads are matched by email/phone; contacts that never came through the website tag are created as CRM-only leads.</p>
+          </div>
+        </div>
+      </Card>
 
       <div className="space-y-6">
         {(conns ?? []).map((c) => {

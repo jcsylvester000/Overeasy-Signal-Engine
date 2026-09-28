@@ -21,10 +21,11 @@ export async function proxy(req: NextRequest) {
       },
     },
   });
-  const { data } = await sb.auth.getUser();
+  // getClaims(): refreshes an expiring session and verifies the JWT locally (no Auth-server round trip with asymmetric keys).
+  const { data } = await sb.auth.getClaims();
   const path = req.nextUrl.pathname;
   const protectedPath = path.startsWith("/app") || path.startsWith("/w/") || path.startsWith("/org/");
-  if (!data.user && protectedPath) {
+  if (!data?.claims?.sub && protectedPath) {
     const to = req.nextUrl.clone();
     to.pathname = "/login";
     to.search = `?next=${encodeURIComponent(path)}`;

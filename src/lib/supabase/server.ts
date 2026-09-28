@@ -1,10 +1,11 @@
 import "server-only";
+import { cache } from "react";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { env } from "@/lib/env";
 
 /** Per-request client acting as the signed-in user. RLS applies to every query. */
-export async function userClient() {
+export const userClient = cache(async () => {
   const store = await cookies();
   return createServerClient(env.supabaseUrl(), env.supabaseAnonKey(), {
     cookies: {
@@ -18,4 +19,4 @@ export async function userClient() {
       },
     },
   });
-}
+});

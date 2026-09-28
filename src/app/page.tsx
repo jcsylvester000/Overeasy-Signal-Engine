@@ -25,7 +25,7 @@ export default async function Home() {
   if (env.isConfigured()) {
     try {
       const sb = await userClient();
-      signedIn = Boolean((await sb.auth.getUser()).data.user);
+      signedIn = Boolean((await sb.auth.getClaims()).data?.claims?.sub);
     } catch {
       signedIn = false;
     }
