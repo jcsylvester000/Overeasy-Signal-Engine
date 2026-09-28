@@ -1,0 +1,13 @@
+node_modules/
+.next/
+out/
+.netlify/
+.env
+.env*.local
+.env.netlify
+*.tsbuildinfo
+next-env.d.ts
+public/ose.js
+coverage/
+.DS_Store
+supabase/.temp/

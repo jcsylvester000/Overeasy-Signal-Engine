@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+/* Brand colours are injected per organization as --brand / --brand-accent (white-label, ADM-02). */
+:root {
+  --brand: #1f3a5f;
+  --brand-accent: #2f855a;
+}
+
+@theme inline {
+  --color-brand: var(--brand);
+  --color-accent: var(--brand-accent);
+  --color-ink: #111827;
+  --color-muted: #6b7280;
+  --color-line: #e5e7eb;
+  --color-panel: #ffffff;
+  --color-canvas: #f6f7f9;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+html,
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+input,
+select,
+textarea {
+  @apply rounded-md border border-line bg-white px-2.5 py-1.5 text-sm;
+}
+input[type="checkbox"],
+input[type="radio"] {
+  @apply h-4 w-4 p-0;
+}
+label {
+  @apply text-sm;
+}

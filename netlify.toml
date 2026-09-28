@@ -1,0 +1,29 @@
+# STAGING ONLY. Next.js on Netlify needs the Next.js Runtime, pinned explicitly (auto-detection can be skipped → bare 404).
+[build]
+  command = "npm run build:netlify"
+  publish = ".next"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+[build.environment]
+  NODE_VERSION = "22"
+  NEXT_TELEMETRY_DISABLED = "1"
+
+# Environment variables (Site configuration → Environment variables). Never commit values. See .env.example.
+#   NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY   Supabase project (public, RLS-protected)
+#   SUPABASE_SERVICE_ROLE_KEY                                 server only: ingest, webhooks, jobs, Vault
+#   OSE_ENCRYPTION_KEY                                        32-byte base64 (openssl rand -base64 32): PII + webhook secrets
+#   OSE_HASH_PEPPER                                           random string: visitor/IP hashing
+#   APP_URL                                                   staging URL, no trailing slash
+#   PLATFORM_APP_NAME                                         default brand name shown when no partner brand applies
+#   INNGEST_EVENT_KEY, INNGEST_SIGNING_KEY                    optional; without them jobs run inline after the response
+#   CONNECTOR_MODE                                            dry_run (default) | test | live  — global ceiling for all connections
+#   GHL_WEBHOOK_PUBLIC_KEY, GHL_CLIENT_ID, GHL_CLIENT_SECRET  when the GHL Marketplace app is approved
+#   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET                    when Google OAuth verification is approved
+#   MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET, MICROSOFT_DEVELOPER_TOKEN
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
